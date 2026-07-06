@@ -80,6 +80,12 @@
   .modalBox { background:#1c2030; border:2px solid #444; border-radius:14px; padding:22px; text-align:center; max-width:340px; }
   .modalBox h2 { margin-top:0; }
   .modalBox button { margin:8px; padding:10px 18px; border-radius:8px; border:none; font-weight:bold; cursor:pointer; }
+  .rpsBtn { font-size:15px; padding:14px 18px !important; }
+  .bigResultOverlay { position:fixed; inset:0; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center; z-index:60; pointer-events:none; }
+  .bigResultText { font-size:56px; font-weight:900; color:#ffd166; text-shadow:0 0 24px rgba(255,209,102,0.8), 0 4px 10px rgba(0,0,0,0.6);
+    text-align:center; animation: bigPop 0.35s ease; }
+  @keyframes bigPop { 0%{ transform:scale(0.4); opacity:0; } 60%{ transform:scale(1.15); opacity:1; } 100%{ transform:scale(1); opacity:1; } }
+  .hiddenPower { opacity:0.6; font-style:italic; }
 </style>
 </head>
 <body>
@@ -175,6 +181,23 @@ function sleep(ms){ return new Promise(resolve=>setTimeout(resolve, ms)); }
 let mpEnabled=false, mySeat=null, myWriterId=null, roomCode=null, roomRef=null,
     applyingRemote=false, mpSeq=0, lobbyOpen=false;
 
+// pregame (waiting / rock-paper-scissors / power draw) state
+let matchPhase=null; // null(local) | 'waiting' | 'rps' | 'draw' | 'playing'
+let pregameData={}, lastResetSeq=0;
+let rpsRound=0, myRpsChosen=false, rpsResolved=false, rpsRevealData=null, rpsCountdown=null, rpsTieHandled=false;
+let matchStartingSeat=null;
+let myDraw={yut:null, mal:null}, drawSpinning=false, drawSpinYut=null, drawSpinMal=null, matchStarted=false;
+let bigResultText=null;
+
+const RPS_BEATS = {'가위':'보', '바위':'가위', '보':'바위'};
+function rpsWinnerSeat(c0, c1){
+  if(c0===c1) return null;
+  if(RPS_BEATS[c0]===c1) return 0;
+  if(RPS_BEATS[c1]===c0) return 1;
+  return null;
+}
+function rpsEmoji(c){ return c==='가위'?'✌️':(c==='바위'?'✊':'✋'); }
+
 function isMyTurn(){ return !mpEnabled || mySeat===current; }
 function randomId(){ return Math.random().toString(36).slice(2)+Date.now().toString(36); }
 function genRoomCode(){
@@ -186,7 +209,11 @@ function openLobby(){ lobbyOpen=true; render(); }
 function closeLobby(){ lobbyOpen=false; render(); }
 
 function handleNewGameClick(){
-  if(mpEnabled && mySeat!==0){ alert('방장(플레이어 1)만 게임을 다시 시작할 수 있습니다.'); return; }
+  if(mpEnabled){
+    if(mySeat!==0){ alert('방장(플레이어 1)만 게임을 다시 시작할 수 있습니다.'); return; }
+    mpRestartMatch();
+    return;
+  }
   initGame();
 }
 
@@ -195,11 +222,16 @@ function mpCreateRoom(){
   roomCode = genRoomCode();
   mySeat = 0;
   mpEnabled = true;
+  matchPhase = 'waiting';
+  resetPregameVarsLocal();
+  players=null; gameOver=false;
   roomRef = db.ref('rooms/'+roomCode);
   roomRef.set({ meta:{ host:myWriterId, guest:null } });
+  subscribeMeta();
+  subscribePregame();
   subscribeRoom();
   lobbyOpen = false;
-  initGame();
+  render();
 }
 
 function mpJoinRoom(code){
@@ -213,20 +245,162 @@ function mpJoinRoom(code){
     myWriterId = randomId();
     mySeat = 1;
     mpEnabled = true;
+    matchPhase = 'waiting';
+    resetPregameVarsLocal();
+    players=null; gameOver=false;
     roomCode = code;
     roomRef = db.ref('rooms/'+code);
     roomRef.child('meta/guest').set(myWriterId);
     lobbyOpen = false;
-    logLines = ['🔌 방에 참가했습니다. 방장의 게임 시작을 기다리는 중...'];
-    gameOver=false; players=[makePlayer(0,'플레이어 1','#e74c3c'), makePlayer(1,'플레이어 2','#3498db')];
-    current=0; bombs=[]; gates=[]; awaitingThrow=false; awaitingUnitClick=false; currentUnits=[];
-    activeYutPower=null; gaedwaejiActive=false; selection=null; showRouteModal=false; routeModalCorner=null;
-    diceRolling=false; animatingIds=new Set(); turnActions=[]; pendingMove=null;
-    applyingRemote = true;
-    render();
-    applyingRemote = false;
+    logLines = ['🔌 방에 참가했습니다.'];
+    subscribeMeta();
+    subscribePregame();
     subscribeRoom();
+    render();
   });
+}
+
+function resetPregameVarsLocal(){
+  rpsRound=0; myRpsChosen=false; rpsResolved=false; rpsRevealData=null; rpsCountdown=null; rpsTieHandled=false;
+  matchStartingSeat=null; myDraw={yut:null,mal:null}; drawSpinning=false; matchStarted=false;
+}
+
+function subscribeMeta(){
+  db.ref('rooms/'+roomCode+'/meta').on('value', snap=>{
+    const meta = snap.val();
+    const opponentPresent = !!(meta && meta.host && meta.guest);
+    if(opponentPresent && matchPhase==='waiting'){
+      matchPhase = 'rps';
+      log('🤝 상대방이 입장했습니다! 가위바위보로 선공을 정합니다.');
+    }
+    render();
+  });
+}
+
+function subscribePregame(){
+  db.ref('rooms/'+roomCode+'/pregame').on('value', snap=>{
+    pregameData = snap.val() || {};
+    const seq = pregameData.resetSeq||0;
+    if(seq !== lastResetSeq){
+      lastResetSeq = seq;
+      matchPhase = 'rps';
+      resetPregameVarsLocal();
+      gameOver=false; players=null;
+      log('🔄 새 대전을 시작합니다! 가위바위보부터 다시 합니다.');
+      render();
+      return;
+    }
+    handlePregameUpdate();
+  });
+}
+
+function handlePregameUpdate(){
+  if(matchPhase==='rps' && !rpsResolved && !rpsCountdown && !rpsRevealData){
+    const roundData = (pregameData.rps && pregameData.rps[rpsRound]) || {};
+    const c0 = roundData['0'], c1 = roundData['1'];
+    if(c0 && c1){
+      const w = rpsWinnerSeat(c0, c1);
+      if(w===null){
+        if(!rpsTieHandled){
+          rpsTieHandled = true;
+          rpsRevealData = {c0, c1, tie:true};
+          render();
+          setTimeout(()=>{
+            rpsRound++; myRpsChosen=false; rpsRevealData=null; rpsTieHandled=false;
+            render();
+          }, 1800);
+        }
+      } else {
+        runRpsCountdown(c0, c1, w);
+      }
+    }
+  }
+  if(matchPhase==='draw'){
+    checkBothDrawn();
+  }
+  render();
+}
+
+function runRpsCountdown(c0, c1, w){
+  rpsResolved = true;
+  matchStartingSeat = w;
+  rpsCountdown = 1; render();
+  setTimeout(()=>{ rpsCountdown=2; render();
+    setTimeout(()=>{ rpsCountdown=3; render();
+      setTimeout(()=>{
+        rpsCountdown=null;
+        rpsRevealData = {c0, c1, winner:w};
+        render();
+        setTimeout(()=>{ matchPhase='draw'; render(); }, 2200);
+      }, 700);
+    }, 700);
+  }, 700);
+}
+
+function chooseRps(choice){
+  if(myRpsChosen) return;
+  myRpsChosen = true;
+  db.ref('rooms/'+roomCode+'/pregame/rps/'+rpsRound+'/'+mySeat).set(choice);
+  render();
+}
+
+function startDraw(){
+  if(myDraw.yut || drawSpinning) return;
+  drawSpinning = true;
+  render();
+  const spinTimer = setInterval(()=>{
+    drawSpinYut = POWERS_YUT[Math.floor(Math.random()*POWERS_YUT.length)].name;
+    drawSpinMal = POWERS_MAL[Math.floor(Math.random()*POWERS_MAL.length)].name;
+    render();
+  }, 80);
+  setTimeout(()=>{
+    clearInterval(spinTimer);
+    const yutKey = POWERS_YUT[Math.floor(Math.random()*POWERS_YUT.length)].key;
+    const malKey = POWERS_MAL[Math.floor(Math.random()*POWERS_MAL.length)].key;
+    myDraw = {yut:yutKey, mal:malKey};
+    drawSpinning = false;
+    db.ref('rooms/'+roomCode+'/pregame/draw/'+mySeat).set(myDraw);
+    render();
+    checkBothDrawn();
+  }, 1600);
+}
+
+function checkBothDrawn(){
+  if(matchStarted) return;
+  const d = pregameData.draw || {};
+  if(d[0] && d[0].yut && d[1] && d[1].yut){
+    startMatch(d[0], d[1]);
+  }
+}
+
+function makePlayerWithPowers(idx,name,color,draw){
+  return {
+    idx, name, color,
+    pieces:[0,1,2,3].map(i=>({id:idx+'-'+i, owner:idx, state:'waiting', track:null, idx:null})),
+    powerYut: {...POWERS_YUT.find(p=>p.key===draw.yut), used:false},
+    powerMal: {...POWERS_MAL.find(p=>p.key===draw.mal), used:false},
+    bankedQueue: []
+  };
+}
+
+function startMatch(hostDraw, guestDraw){
+  if(matchStarted) return;
+  matchStarted = true;
+  players = [makePlayerWithPowers(0,'플레이어 1','#e74c3c',hostDraw), makePlayerWithPowers(1,'플레이어 2','#3498db',guestDraw)];
+  bombs=[]; gates=[];
+  pendingMove=null; awaitingThrow=false; awaitingUnitClick=false; currentUnits=[];
+  activeYutPower=null; gaedwaejiActive=false; selection=null;
+  showRouteModal=false; routeModalCorner=null; _routeResolve=null;
+  gameOver=false; winnerIdx=null;
+  diceRolling=false; animatingIds=new Set();
+  logLines = ['🎮 온라인 대전이 시작됩니다!'];
+  matchPhase = 'playing';
+  startTurn(matchStartingSeat);
+}
+
+function mpRestartMatch(){
+  const newSeq = (pregameData.resetSeq||0)+1;
+  db.ref('rooms/'+roomCode+'/pregame').set({resetSeq:newSeq});
 }
 
 function subscribeRoom(){
@@ -234,6 +408,7 @@ function subscribeRoom(){
     const data = snap.val();
     if(!data || !data.state) return;
     if(data.writerId === myWriterId) return;
+    if(matchPhase!=='playing') return;
     applyingRemote = true;
     applyRemoteState(data.state);
     render();
@@ -381,11 +556,15 @@ function startYutPower(key){
   activeYutPower = key; render();
 }
 
-function chooseGaedwaeji(value){
+async function chooseGaedwaeji(value){
   if(!isMyTurn()) return;
   gaedwaejiActive=false;
   const label = value===1?'도':'개';
   log('🎲 개와 돼지의 시간: '+label+'('+value+'칸)을 선택했습니다.');
+  bigResultText = '🎲 '+label+' ('+value+'칸)';
+  render();
+  await sleep(1300);
+  bigResultText = null;
   pendingMove = {value, backward:false, _extra:false};
   render();
   promptUnitSelection();
@@ -417,8 +596,21 @@ async function throwYut(){
   }
   else { result = rollNatural(); }
   activeYutPower = null;
-  if(result.isNak){ log('🎲 낙! 이번 기회를 날렸습니다.'); render(); processNext(); return; }
+  if(result.isNak){
+    log('🎲 낙! 이번 기회를 날렸습니다.');
+    bigResultText = '💥 낙!';
+    render();
+    await sleep(1300);
+    bigResultText = null;
+    render();
+    processNext();
+    return;
+  }
   log('🎲 '+result.label+'! ('+(result.backward?'뒤로 ':'')+result.value+'칸'+(result.extra?', 한번 더!':'')+')');
+  bigResultText = '🎲 '+result.label+(result.backward?' (뒤로 '+result.value+'칸)':' ('+result.value+'칸)');
+  render();
+  await sleep(1300);
+  bigResultText = null;
   pendingMove = {value:result.value, backward:!!result.backward, _extra:!!result.extra};
   render();
   promptUnitSelection();
@@ -769,20 +961,110 @@ function processNext(){
 
 // ---------- render ----------
 function render(){
+  renderMpStatus();
+  if(mpEnabled && matchPhase && matchPhase!=='playing'){
+    renderPregame();
+    return;
+  }
   renderBanner();
   renderPanel(0); renderPanel(1);
   renderBoard();
   renderControls();
   renderLog();
   renderModal();
-  renderMpStatus();
+  renderBigResult();
   if(mpEnabled && !applyingRemote) pushStateToFirebase();
+}
+
+function renderBigResult(){
+  const existing = document.getElementById('bigResultLayer');
+  if(existing) existing.remove();
+  if(!bigResultText) return;
+  const div = document.createElement('div');
+  div.id = 'bigResultLayer';
+  div.className = 'bigResultOverlay';
+  div.innerHTML = '<div class="bigResultText">'+bigResultText+'</div>';
+  document.body.appendChild(div);
+}
+
+function renderPregame(){
+  document.getElementById('turnBanner').textContent='';
+  document.getElementById('panel0').innerHTML='';
+  document.getElementById('panel1').innerHTML='';
+  document.getElementById('board').innerHTML='';
+  document.getElementById('noticeBox').textContent='';
+  document.getElementById('controls').innerHTML='';
+  document.getElementById('log').innerHTML='';
+  const el = document.getElementById('modalLayer');
+  if(matchPhase==='waiting'){
+    el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>🌐 온라인 대전</h2>'
+      + '<p>방 코드: <b style="font-size:22px;letter-spacing:2px;">'+roomCode+'</b></p>'
+      + '<p>⏳ 상대방을 기다리는 중...</p></div></div>';
+    return;
+  }
+  if(matchPhase==='rps'){ renderRpsModal(el); return; }
+  if(matchPhase==='draw'){ renderDrawModal(el); return; }
+  el.innerHTML='';
+}
+
+function renderRpsModal(el){
+  if(rpsCountdown){
+    el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h1 style="font-size:90px;margin:0;">'+rpsCountdown+'</h1></div></div>';
+    return;
+  }
+  if(rpsRevealData){
+    const myChoice = mySeat===0?rpsRevealData.c0:rpsRevealData.c1;
+    const oppChoice = mySeat===0?rpsRevealData.c1:rpsRevealData.c0;
+    if(rpsRevealData.tie){
+      el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>✊✌️✋ 가위바위보</h2>'
+        + '<p style="font-size:44px;">'+rpsEmoji(myChoice)+' vs '+rpsEmoji(oppChoice)+'</p>'
+        + '<h3>비겼습니다! 다시 선택하세요...</h3></div></div>';
+    } else {
+      const iWon = rpsRevealData.winner===mySeat;
+      el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>결과 발표!</h2>'
+        + '<p style="font-size:50px;">'+rpsEmoji(myChoice)+' vs '+rpsEmoji(oppChoice)+'</p>'
+        + '<h2 style="color:#ffd166;">'+(iWon?'내가 승리! 선공입니다 🎉':'상대방 승리! 상대가 선공입니다')+'</h2></div></div>';
+    }
+    return;
+  }
+  if(myRpsChosen){
+    el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>✊✌️✋ 가위바위보</h2>'
+      + '<p>선택 완료! 상대방을 기다리는 중...</p></div></div>';
+    return;
+  }
+  el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>✊✌️✋ 가위바위보</h2>'
+    + '<p>선공을 정합니다. 하나를 고르세요! (상대방에게 보이지 않습니다)</p>'
+    + '<button class="subBtn rpsBtn" onclick="chooseRps(\'가위\')">✌️ 가위</button>'
+    + '<button class="subBtn rpsBtn" onclick="chooseRps(\'바위\')">✊ 바위</button>'
+    + '<button class="subBtn rpsBtn" onclick="chooseRps(\'보\')">✋ 보</button>'
+    + '</div></div>';
+}
+
+function renderDrawModal(el){
+  const oppReady = !!(pregameData.draw && pregameData.draw[1-mySeat] && pregameData.draw[1-mySeat].yut);
+  let html = '<div class="modalOverlay"><div class="modalBox">'
+    + '<h2>🎰 초능력 뽑기</h2>'
+    + '<p>'+(matchStartingSeat===mySeat?'🥇 선공입니다! ':'🥈 후공입니다. ')+'초능력 2개를 뽑으세요.</p>';
+  if(drawSpinning){
+    html += '<div class="powerCard"><b>🌀 '+drawSpinYut+'</b></div>'
+          + '<div class="powerCard"><b>♟️ '+drawSpinMal+'</b></div>';
+  } else if(myDraw.yut){
+    const y = POWERS_YUT.find(p=>p.key===myDraw.yut), m = POWERS_MAL.find(p=>p.key===myDraw.mal);
+    html += '<div class="powerCard"><b>🌀 '+y.name+'</b>'+y.desc+'</div>'
+          + '<div class="powerCard"><b>♟️ '+m.name+'</b>'+m.desc+'</div>'
+          + '<p>'+(oppReady?'상대방도 준비되었습니다! 곧 시작합니다...':'⏳ 상대방이 뽑는 중...')+'</p>';
+  } else {
+    html += '<button class="subBtn" onclick="startDraw()" style="font-size:18px;">🎰 뽑기</button>';
+  }
+  html += '</div></div>';
+  el.innerHTML = html;
 }
 
 function renderMpStatus(){
   const el = document.getElementById('mpStatus');
   if(!mpEnabled){ el.textContent=''; return; }
-  el.textContent = '🌐 온라인 대전 중 · 방 코드: '+roomCode+' · 나는 '+(mySeat===0?'플레이어 1(방장)':'플레이어 2')+(isMyTurn()?' · 내 차례!':' · 상대방 차례');
+  const turnInfo = matchPhase==='playing' ? (isMyTurn()?' · 내 차례!':' · 상대방 차례') : '';
+  el.textContent = '🌐 온라인 대전 중 · 방 코드: '+roomCode+' · 나는 '+(mySeat===0?'플레이어 1(방장)':'플레이어 2')+turnInfo;
 }
 
 function renderBanner(){
@@ -815,12 +1097,14 @@ function renderPanel(idx){
   const yutFull = POWERS_YUT.find(x=>x.key===yc.key);
   const malFull = POWERS_MAL.find(x=>x.key===mc.key);
   const armedYut = current===idx && activeYutPower===yc.key;
-  html += '<div class="powerCard'+(yc.used?' usedCard':'')+(armedYut?' armed':'')+'">'
-        + '<b>🌀 '+yutFull.name+'</b>' + yutFull.desc
+  const hideYut = mpEnabled && idx!==mySeat && !yc.used;
+  const hideMal = mpEnabled && idx!==mySeat && !mc.used;
+  html += '<div class="powerCard'+(yc.used?' usedCard':'')+(armedYut?' armed':'')+(hideYut?' hiddenPower':'')+'">'
+        + '<b>🌀 '+(hideYut?'??? (비공개)':yutFull.name)+'</b>' + (hideYut?'상대방의 능력은 사용 전까지 볼 수 없습니다.':yutFull.desc)
         + '<button onclick="startYutPower(\''+yc.key+'\')" '+((current!==idx||!awaitingThrow||yc.used||activeYutPower||gaedwaejiActive||!isMyTurn())?'disabled':'')+'>'
         + (yc.used?'사용함':(armedYut?'선택됨 - 던지기 클릭':'사용하기'))+'</button></div>';
-  html += '<div class="powerCard'+(mc.used?' usedCard':'')+'">'
-        + '<b>♟️ '+malFull.name+'</b>' + malFull.desc
+  html += '<div class="powerCard'+(mc.used?' usedCard':'')+(hideMal?' hiddenPower':'')+'">'
+        + '<b>♟️ '+(hideMal?'??? (비공개)':malFull.name)+'</b>' + (hideMal?'상대방의 능력은 사용 전까지 볼 수 없습니다.':malFull.desc)
         + '<button onclick="startMalPower(\''+mc.key+'\')" '+((current!==idx||!awaitingThrow||mc.used||selection||!isMyTurn())?'disabled':'')+'>'
         + (mc.used?'사용함':'사용하기')+'</button></div>';
   el.innerHTML = html;
@@ -867,7 +1151,7 @@ function renderBoard(){
   const groups = {};
   allPieces().filter(p=>p.state==='onboard').forEach(p=>{
     const nid = nodeIdForPiece(p);
-    const key = nid+'|'+p.owner;
+    const key = p.track+':'+p.idx+'|'+p.owner;
     (groups[key] = groups[key] || {nid, owner:p.owner, pieces:[]}).pieces.push(p);
   });
   let piecesHtml = '';
