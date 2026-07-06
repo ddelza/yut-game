@@ -81,6 +81,9 @@
   .modalBox h2 { margin-top:0; }
   .modalBox button { margin:8px; padding:10px 18px; border-radius:8px; border:none; font-weight:bold; cursor:pointer; }
   .rpsBtn { font-size:15px; padding:14px 18px !important; }
+  .arrowBtn { font-size:26px; padding:12px 16px !important; background:#118ab2; color:#fff; line-height:1.4; }
+  .arrowBtn:hover { background:#0d90a0; }
+  .pendingList { font-size:13px; color:#9fe6c8; margin:6px 0; }
   .bigResultOverlay { position:fixed; inset:0; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center; z-index:60; pointer-events:none; }
   .bigResultText { font-size:56px; font-weight:900; color:#ffd166; text-shadow:0 0 24px rgba(255,209,102,0.8), 0 4px 10px rgba(0,0,0,0.6);
     text-align:center; animation: bigPop 0.35s ease; }
@@ -169,9 +172,10 @@ const POWERS_MAL = [
 ];
 
 // ---------- state ----------
-let players, current, bombs, gates, turnActions, pendingMove, awaitingThrow, awaitingUnitClick,
-    currentUnits, activeYutPower, gaedwaejiActive, selection, showRouteModal, routeModalCorner,
-    _routeResolve, gameOver, winnerIdx, logLines, diceRolling, animatingIds;
+let players, current, bombs, gates, pendingMove, awaitingThrow, awaitingUnitClick,
+    currentUnits, activeYutPower, gaedwaejiActive, selection, showRouteModal, routeChoices,
+    _routeResolve, gameOver, winnerIdx, logLines, diceRolling, animatingIds,
+    pendingResults, owedThrows, awaitingResolveChoice;
 
 const STEP_DELAY = 260;
 const DICE_ROLL_DURATION = 2000;
@@ -390,9 +394,10 @@ function startMatch(hostDraw, guestDraw){
   bombs=[]; gates=[];
   pendingMove=null; awaitingThrow=false; awaitingUnitClick=false; currentUnits=[];
   activeYutPower=null; gaedwaejiActive=false; selection=null;
-  showRouteModal=false; routeModalCorner=null; _routeResolve=null;
+  showRouteModal=false; routeChoices=null; _routeResolve=null;
   gameOver=false; winnerIdx=null;
   diceRolling=false; animatingIds=new Set();
+  pendingResults=[]; owedThrows=0; awaitingResolveChoice=false;
   logLines = ['🎮 온라인 대전이 시작됩니다!'];
   matchPhase = 'playing';
   startTurn(matchStartingSeat);
@@ -429,7 +434,8 @@ function serializeState(){
       pieces:p.pieces.map(pc=>({id:pc.id, owner:pc.owner, state:pc.state, track:pc.track, idx:pc.idx})),
       powerYut:p.powerYut, powerMal:p.powerMal, bankedQueue:p.bankedQueue
     })),
-    current, bombs, gates, turnActions, pendingMove,
+    current, bombs, gates, pendingMove,
+    pendingResults, owedThrows, awaitingResolveChoice,
     awaitingThrow, awaitingUnitClick,
     currentUnits: currentUnits.map(u=>({type:u.type, pieceIds:u.pieces.map(pc=>pc.id)})),
     activeYutPower, gaedwaejiActive,
@@ -441,7 +447,7 @@ function serializeState(){
       targetGroupIds: (selection.targetGroup||[]).map(pc=>pc.id),
       targetPos: selection.targetPos||null
     } : null,
-    showRouteModal, routeModalCorner, gameOver, winnerIdx,
+    showRouteModal, routeChoices, gameOver, winnerIdx,
     logLines, diceRolling, animatingIds:[...animatingIds]
   };
 }
@@ -453,7 +459,8 @@ function applyRemoteState(s){
     powerYut:p.powerYut, powerMal:p.powerMal, bankedQueue:p.bankedQueue||[]
   }));
   current = s.current; bombs = s.bombs||[]; gates = s.gates||[];
-  turnActions = s.turnActions||[]; pendingMove = s.pendingMove||null;
+  pendingMove = s.pendingMove||null;
+  pendingResults = s.pendingResults||[]; owedThrows = s.owedThrows||0; awaitingResolveChoice = !!s.awaitingResolveChoice;
   awaitingThrow = !!s.awaitingThrow; awaitingUnitClick = !!s.awaitingUnitClick;
   currentUnits = (s.currentUnits||[]).map(u=>({type:u.type, pieces:u.pieceIds.map(findPieceById).filter(Boolean)}));
   activeYutPower = s.activeYutPower||null; gaedwaejiActive = !!s.gaedwaejiActive;
@@ -464,7 +471,7 @@ function applyRemoteState(s){
     targetGroup:(s.selection.targetGroupIds||[]).map(findPieceById).filter(Boolean),
     targetPos:s.selection.targetPos||null
   } : null;
-  showRouteModal = !!s.showRouteModal; routeModalCorner = s.routeModalCorner||null;
+  showRouteModal = !!s.showRouteModal; routeChoices = s.routeChoices||null;
   gameOver = !!s.gameOver; winnerIdx = (s.winnerIdx===0||s.winnerIdx===1) ? s.winnerIdx : null;
   logLines = s.logLines||[]; diceRolling = !!s.diceRolling;
   animatingIds = new Set(s.animatingIds||[]);
@@ -487,9 +494,10 @@ function initGame(){
   current = 0;
   pendingMove=null; awaitingThrow=false; awaitingUnitClick=false; currentUnits=[];
   activeYutPower=null; gaedwaejiActive=false; selection=null;
-  showRouteModal=false; routeModalCorner=null; _routeResolve=null;
+  showRouteModal=false; routeChoices=null; _routeResolve=null;
   gameOver=false; winnerIdx=null;
   diceRolling=false; animatingIds=new Set();
+  pendingResults=[]; owedThrows=0; awaitingResolveChoice=false;
   logLines = ['🎮 게임을 시작합니다! 각자 초능력 카드를 1장씩 받았습니다.'];
   startTurn(0);
 }
@@ -511,17 +519,25 @@ function nodeIdForPiece(p){ if(p.state!=='onboard') return null; return nodeIdFr
 function isOccupiedMain(idx){ return allPieces().some(p=>p.state==='onboard' && p.track==='main' && p.idx===idx); }
 function hasBombOrGateAt(node){ return bombs.some(b=>b.node===node) || gates.some(g=>g.node===node); }
 
-// ---------- dry run: find branch corner ----------
-function dryRunFindBranch(pos, steps){
-  let track=pos.track, idx=pos.idx, remaining=steps, used=0;
-  while(remaining>0){
-    if(track==='main' && (idx===5 || idx===10)){
-      return {cornerNum: idx, stepsUsedSoFar: used, stepsRemaining: remaining};
-    }
-    if(track==='main'){ idx++; if(idx>=20){ return null; } }
-    else if(track==='diag5'){ idx++; if(idx>=4){ track='main'; idx=15; } }
-    else if(track==='diag10'){ idx++; if(idx>=4){ return null; } }
-    remaining--; used++;
+// ---------- branch (shortcut) choices: only offered when a piece STARTS its move exactly at a fork ----------
+function getBranchChoicesAt(pos){
+  if(pos.track==='main' && pos.idx===5){
+    return [
+      {label:'⬆️ 그대로 진행', arrow:'⬆️', track:'main', idx:5},
+      {label:'↘️ 지름길 (중앙으로)', arrow:'↘️', track:'diag5', idx:0}
+    ];
+  }
+  if(pos.track==='main' && pos.idx===10){
+    return [
+      {label:'⬅️ 그대로 진행', arrow:'⬅️', track:'main', idx:10},
+      {label:'↘️ 지름길 (중앙으로)', arrow:'↘️', track:'diag10', idx:0}
+    ];
+  }
+  if((pos.track==='diag5' || pos.track==='diag10') && pos.idx===2){
+    return [
+      {label:'↙️ 왼쪽 아래 (15번 코너)', arrow:'↙️', track:'diag5', idx:2},
+      {label:'↘️ 오른쪽 아래 (결승 방향)', arrow:'↘️', track:'diag10', idx:2}
+    ];
   }
   return null;
 }
@@ -559,20 +575,22 @@ function startYutPower(key){
 async function chooseGaedwaeji(value){
   if(!isMyTurn()) return;
   gaedwaejiActive=false;
+  owedThrows--;
   const label = value===1?'도':'개';
   log('🎲 개와 돼지의 시간: '+label+'('+value+'칸)을 선택했습니다.');
   bigResultText = '🎲 '+label+' ('+value+'칸)';
   render();
   await sleep(1300);
   bigResultText = null;
-  pendingMove = {value, backward:false, _extra:false};
+  pendingResults.push({value, backward:false});
   render();
-  promptUnitSelection();
+  advanceTurnFlow();
 }
 
 async function throwYut(){
-  if(!awaitingThrow || !isMyTurn()) return;
+  if(!awaitingThrow || !isMyTurn() || owedThrows<=0) return;
   awaitingThrow=false;
+  owedThrows--;
   diceRolling=true;
   render();
   await sleep(DICE_ROLL_DURATION);
@@ -592,7 +610,7 @@ async function throwYut(){
       player.bankedQueue.push({value:result.value, backward:!!result.backward, extra:!!result.extra});
       log('🎲 '+result.label+'! 테이크아웃으로 다음 턴에 사용하도록 저장했습니다.');
     }
-    activeYutPower=null; render(); processNext(); return;
+    activeYutPower=null; render(); advanceTurnFlow(); return;
   }
   else { result = rollNatural(); }
   activeYutPower = null;
@@ -603,7 +621,7 @@ async function throwYut(){
     await sleep(1300);
     bigResultText = null;
     render();
-    processNext();
+    advanceTurnFlow();
     return;
   }
   log('🎲 '+result.label+'! ('+(result.backward?'뒤로 ':'')+result.value+'칸'+(result.extra?', 한번 더!':'')+')');
@@ -611,7 +629,41 @@ async function throwYut(){
   render();
   await sleep(1300);
   bigResultText = null;
-  pendingMove = {value:result.value, backward:!!result.backward, _extra:!!result.extra};
+  pendingResults.push({value:result.value, backward:!!result.backward});
+  if(result.extra) owedThrows++;
+  render();
+  advanceTurnFlow();
+}
+
+// ---------- turn flow: accumulate throws first, then resolve ----------
+function advanceTurnFlow(){
+  if(gameOver) return;
+  awaitingResolveChoice = false;
+  if(owedThrows>0){
+    awaitingThrow = true; awaitingUnitClick = false;
+    render();
+  } else if(pendingResults.length>0){
+    awaitingThrow = false;
+    promptResolveSelection();
+  } else {
+    endTurn();
+  }
+}
+
+function promptResolveSelection(){
+  if(pendingResults.length===1){
+    pickPendingResult(0);
+    return;
+  }
+  awaitingResolveChoice = true;
+  render();
+}
+
+function pickPendingResult(idx){
+  if(!isMyTurn()) return;
+  awaitingResolveChoice = false;
+  const chosen = pendingResults.splice(idx,1)[0];
+  pendingMove = {value:chosen.value, backward:chosen.backward, _extra:false};
   render();
   promptUnitSelection();
 }
@@ -630,7 +682,7 @@ function promptUnitSelection(){
   Object.values(groups).forEach(g=>units.push({type:'stack', pieces:g}));
   if(units.length===0){
     log('이동할 말이 없습니다.');
-    pendingMove=null; render(); processNext(); return;
+    pendingMove=null; render(); advanceTurnFlow(); return;
   }
   currentUnits = units;
   awaitingUnitClick = true;
@@ -663,8 +715,9 @@ function onPieceClick(pieceId){
 
 async function performMove(unitPieces, moveInfo){
   unitPieces.forEach(p=>animatingIds.add(p.id));
+  const cameFromWaiting = unitPieces[0].state==='waiting';
   let pos;
-  if(unitPieces[0].state==='waiting'){
+  if(cameFromWaiting){
     pos = {track:'main', idx:0};
     unitPieces.forEach(p=>{ p.state='onboard'; p.track='main'; p.idx=0; });
     render();
@@ -673,11 +726,19 @@ async function performMove(unitPieces, moveInfo){
     pos = {track:unitPieces[0].track, idx:unitPieces[0].idx};
   }
   let bombed=false;
+  let restedAtClose=false;
 
   async function stepPosOnce(){
-    if(pos.track==='main'){ pos.idx++; if(pos.idx>=20){ pos.track='FINISH'; return; } }
+    if(pos.track==='main'){
+      if(restedAtClose){ pos.track='FINISH'; return; }
+      pos.idx++;
+      if(pos.idx>=20){ pos.idx=0; restedAtClose=true; }
+    }
     else if(pos.track==='diag5'){ pos.idx++; if(pos.idx>=4){ pos.track='main'; pos.idx=15; } }
-    else if(pos.track==='diag10'){ pos.idx++; if(pos.idx>=4){ pos.track='FINISH'; return; } }
+    else if(pos.track==='diag10'){
+      if(pos.idx===3){ pos.track='FINISH'; return; }
+      pos.idx++;
+    }
     unitPieces.forEach(p=>{ p.track=pos.track; p.idx=pos.idx; });
     render();
     await sleep(STEP_DELAY);
@@ -704,34 +765,22 @@ async function performMove(unitPieces, moveInfo){
       if(pos.track==='WAITING') break;
       if(checkBomb()) break;
     }
+  } else if(!cameFromWaiting && pos.track==='main' && pos.idx===0){
+    // already resting exactly at the closing point from a previous move: any forward roll finishes
+    pos.track='FINISH';
   } else {
-    const branch = dryRunFindBranch(pos, moveInfo.value);
-    if(branch){
-      for(let i=0;i<branch.stepsUsedSoFar;i++){
-        await stepPosOnce();
-        if(pos.track==='FINISH') break;
-        if(checkBomb()) break;
-      }
-      if(pos.track!=='FINISH' && !bombed){
-        const takeShortcut = await askRouteChoice(branch.cornerNum);
-        if(takeShortcut){
-          pos.track = branch.cornerNum===5 ? 'diag5' : 'diag10'; pos.idx=0;
-          unitPieces.forEach(p=>{ p.track=pos.track; p.idx=pos.idx; });
-          render();
-          await sleep(STEP_DELAY);
-        }
-        for(let i=0;i<branch.stepsRemaining;i++){
-          await stepPosOnce();
-          if(pos.track==='FINISH') break;
-          if(checkBomb()) break;
-        }
-      }
-    } else {
-      for(let i=0;i<moveInfo.value;i++){
-        await stepPosOnce();
-        if(pos.track==='FINISH') break;
-        if(checkBomb()) break;
-      }
+    const choices = getBranchChoicesAt(pos);
+    if(choices){
+      const picked = await askDirectionChoice(choices);
+      pos.track = picked.track; pos.idx = picked.idx;
+      unitPieces.forEach(p=>{ p.track=pos.track; p.idx=pos.idx; });
+      render();
+      await sleep(STEP_DELAY);
+    }
+    for(let i=0;i<moveInfo.value;i++){
+      await stepPosOnce();
+      if(pos.track==='FINISH') break;
+      if(checkBomb()) break;
     }
   }
 
@@ -763,26 +812,26 @@ async function performMove(unitPieces, moveInfo){
     }
   }
   render();
-  const grantExtra = moveInfo._extra || capturedSomething;
   pendingMove = null;
-  if(grantExtra && !gameOver) turnActions.unshift({type:'throw'});
-  if(!gameOver) processNext();
+  if(capturedSomething && !gameOver) owedThrows++;
+  if(!gameOver) advanceTurnFlow();
 }
 
-function askRouteChoice(cornerNum){
+function askDirectionChoice(choices){
   return new Promise(resolve=>{
     _routeResolve = resolve;
-    routeModalCorner = cornerNum;
+    routeChoices = choices;
     showRouteModal = true;
     render();
   });
 }
-function chooseRoute(take){
-  if(!isMyTurn()) return;
-  showRouteModal=false;
+function chooseDirection(i){
+  if(!isMyTurn() || !routeChoices) return;
+  const picked = routeChoices[i];
+  showRouteModal=false; routeChoices=null;
   const r=_routeResolve; _routeResolve=null;
   render();
-  if(r) r(take);
+  if(r) r(picked);
 }
 
 function peekForward(pos, n){
@@ -829,9 +878,9 @@ function useTablePower(){
   });
   useMalPower();
   log('🌀 밥상 뒤집기! 보드 위 모든 말의 위치가 무작위로 바뀌었습니다.');
-  awaitingThrow=false;
+  owedThrows--;
   render();
-  processNext();
+  advanceTurnFlow();
 }
 
 function cancelSelection(){
@@ -847,7 +896,7 @@ function handlePowerClick(piece, group){
     if(isMine || piece.state!=='onboard'){ alert('상대방의 보드 위 말을 선택하세요.'); return; }
     group.forEach(p=>{ p.state='waiting'; p.track=null; p.idx=null; });
     useMalPower(); log('👋 강제 귀가! 상대 말을 출발 전으로 되돌렸습니다.');
-    selection=null; render(); processNext(); return;
+    selection=null; owedThrows--; render(); advanceTurnFlow(); return;
   }
   if(sel.power==='eop'){
     if(!isMine || piece.state!=='onboard'){ alert('자신의 보드 위 말을 선택하세요.'); return; }
@@ -855,7 +904,7 @@ function handlePowerClick(piece, group){
     if(!waiting){ alert('업을 대기 말이 없습니다.'); selection=null; render(); return; }
     waiting.state='onboard'; waiting.track=piece.track; waiting.idx=piece.idx;
     useMalPower(); log('🐎 업고 가실게요! 대기 중인 말을 업었습니다.');
-    selection=null; render(); processNext(); return;
+    selection=null; owedThrows--; render(); advanceTurnFlow(); return;
   }
   if(sel.power==='swap'){
     if(sel.stage===1){
@@ -867,7 +916,7 @@ function handlePowerClick(piece, group){
       sel.myGroup.forEach(p=>{ p.track=bPos.track; p.idx=bPos.idx; });
       group.forEach(p=>{ p.track=aPos.track; p.idx=aPos.idx; });
       useMalPower(); log('🔄 자리 좀 바꿔주세요! 위치를 서로 교체했습니다.');
-      selection=null; render(); processNext(); return;
+      selection=null; owedThrows--; render(); advanceTurnFlow(); return;
     }
   }
   if(sel.power==='front'){
@@ -892,7 +941,7 @@ function chooseFrontOffset(n){
   const pos = peekForward(selection.refPos, n);
   selection.targetGroup.forEach(p=>{ p.track=pos.track; p.idx=pos.idx; });
   useMalPower(); log('👉 제 앞에 놔주세요! 상대 말을 '+n+'칸 앞으로 소환했습니다.');
-  selection=null; render(); processNext();
+  selection=null; owedThrows--; render(); advanceTurnFlow();
 }
 function chooseBackhugPiece(pieceId){
   if(!isMyTurn()) return;
@@ -900,7 +949,7 @@ function chooseBackhugPiece(pieceId){
   const pos = peekBackward(selection.targetPos, 1);
   piece.state='onboard'; piece.track=pos.track; piece.idx=pos.idx;
   useMalPower(); log('🤗 백허그! 상대 말 바로 뒤에 착지했습니다.');
-  selection=null; render(); processNext();
+  selection=null; owedThrows--; render(); advanceTurnFlow();
 }
 
 function onNodeClick(idx){
@@ -909,13 +958,13 @@ function onNodeClick(idx){
     if(idx===0 || isOccupiedMain(idx) || hasBombOrGateAt('o'+idx)){ alert('말이 있거나 이미 장치가 설치된 칸에는 놓을 수 없습니다.'); return; }
     gates.push({node:'o'+idx});
     useMalPower(); log('✨ 결승 게이트를 '+idx+'번 칸에 설치했습니다.');
-    selection=null; render(); processNext(); return;
+    selection=null; owedThrows--; render(); advanceTurnFlow(); return;
   }
   if(selection.power==='bomb' && selection.stage===1){
     if(idx===0 || isOccupiedMain(idx) || hasBombOrGateAt('o'+idx)){ alert('말이 있거나 이미 장치가 설치된 칸에는 놓을 수 없습니다.'); return; }
     bombs.push({node:'o'+idx});
     useMalPower(); log('💣 폭탄을 '+idx+'번 칸에 설치했습니다.');
-    selection=null; render(); processNext(); return;
+    selection=null; owedThrows--; render(); advanceTurnFlow(); return;
   }
 }
 
@@ -932,31 +981,20 @@ function endTurn(){
 function startTurn(idx){
   current = idx;
   const player = players[current];
+  pendingResults = [];
+  owedThrows = 1;
   if(player.bankedQueue.length>0){
-    turnActions = player.bankedQueue.map(b=>({type:'resolved', value:b.value, backward:b.backward, extra:b.extra}));
+    player.bankedQueue.forEach(b=>{
+      pendingResults.push({value:b.value, backward:b.backward});
+      if(b.extra) owedThrows++;
+    });
     player.bankedQueue = [];
-    turnActions.push({type:'throw'});
-  } else {
-    turnActions = [{type:'throw'}];
+    log('📦 저장해둔 테이크아웃 결과가 이번 턴에 추가됩니다.');
   }
   activeYutPower=null; gaedwaejiActive=false; selection=null;
   log('👉 '+player.name+'의 차례입니다.');
   render();
-  processNext();
-}
-function processNext(){
-  if(gameOver) return;
-  if(turnActions.length===0){ endTurn(); return; }
-  const action = turnActions.shift();
-  if(action.type==='throw'){
-    awaitingThrow=true; render();
-  } else {
-    pendingMove = {value:action.value, backward:action.backward, _extra:!!action.extra};
-    awaitingThrow=false;
-    log('📦 저장해둔 결과 적용: '+(action.backward?'뒤로 ':'')+action.value+'칸');
-    render();
-    promptUnitSelection();
-  }
+  advanceTurnFlow();
 }
 
 // ---------- render ----------
@@ -1189,13 +1227,22 @@ function renderControls(){
     html += '<div class="diceAnim"><div class="stick"></div><div class="stick"></div><div class="stick"></div><div class="stick"></div></div>';
   } else if(!gameOver && !isMyTurn()){
     if(awaitingThrow) notice = '⏳ 상대방이 윷을 던질 차례입니다...';
+    else if(awaitingResolveChoice) notice = '⏳ 상대방이 어떤 결과를 사용할지 고르고 있습니다...';
     else if(awaitingUnitClick) notice = '⏳ 상대방이 이동할 말을 선택하고 있습니다...';
     else if(gaedwaejiActive) notice = '⏳ 상대방이 개와 돼지의 시간 결과를 고르고 있습니다...';
     else if(selection) notice = '⏳ 상대방이 능력을 사용하고 있습니다...';
     else notice = '⏳ 상대방의 차례입니다...';
   } else if(!gameOver){
+    if(pendingResults.length>0 && (awaitingThrow || gaedwaejiActive)){
+      html += '<div class="pendingList">보유 중인 이동값: '+pendingResults.map(r=>(r.backward?'뒤로 ':'')+r.value+'칸').join(', ')+' (모두 던진 뒤 사용)</div>';
+    }
     if(awaitingThrow){
       html += '<button class="mainBtn" onclick="throwYut()">🎲 윷 던지기'+(activeYutPower?' ('+POWERS_YUT.find(x=>x.key===activeYutPower).name+' 적용)':'')+'</button>';
+    } else if(awaitingResolveChoice){
+      notice = '어떤 결과를 먼저 사용할까요?';
+      pendingResults.forEach((r,i)=>{
+        html += '<button class="subBtn" onclick="pickPendingResult('+i+')">'+(r.backward?'뒤로 ':'')+r.value+'칸 사용</button>';
+      });
     } else if(gaedwaejiActive){
       notice = '개와 돼지의 시간! 원하는 결과를 선택하세요.';
       html += '<button class="subBtn" onclick="chooseGaedwaeji(1)">도 (1칸)</button>';
@@ -1267,14 +1314,16 @@ function renderModal(){
     return;
   }
   if(showRouteModal){
-    if(isMyTurn()){
-      el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>갈림길!</h2>'
-        + '<p>'+routeModalCorner+'번 코너에 도착했습니다.<br>지름길(가운데)로 갈까요?</p>'
-        + '<button onclick="chooseRoute(true)" style="background:#f1c40f;">⚡ 지름길로 가기</button>'
-        + '<button onclick="chooseRoute(false)" style="background:#555;color:#eee;">그냥 가기</button></div></div>';
+    if(isMyTurn() && routeChoices){
+      let html = '<div class="modalOverlay"><div class="modalBox"><h2>갈림길!</h2><p>방향을 선택하세요</p>';
+      routeChoices.forEach((c,i)=>{
+        html += '<button class="arrowBtn" onclick="chooseDirection('+i+')">'+c.arrow+'<br><span style="font-size:12px;">'+c.label.replace(/^\S+\s/,'')+'</span></button>';
+      });
+      html += '</div></div>';
+      el.innerHTML = html;
     } else {
       el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>갈림길!</h2>'
-        + '<p>상대방이 '+routeModalCorner+'번 코너에서 경로를 고르고 있습니다...</p></div></div>';
+        + '<p>상대방이 갈림길에서 방향을 고르고 있습니다...</p></div></div>';
     }
     return;
   }
