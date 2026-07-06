@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>초능력 윷놀이</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin:0; padding:16px; font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;
+    background: radial-gradient(circle at top, #232838 0%, #12141c 70%);
+    color:#eee; min-height:100vh;
+  }
+  h1 { text-align:center; margin:4px 0 12px; font-size:26px; letter-spacing:1px;
+       background:linear-gradient(90deg,#ffd166,#06d6a0,#118ab2); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  #topBar { text-align:center; margin-bottom:10px; }
+  #topBar button { background:#333; color:#eee; border:1px solid #555; border-radius:6px; padding:6px 14px; cursor:pointer; margin:0 4px; }
+  #topBar button:hover { background:#444; }
+  #mpStatus { text-align:center; font-size:13px; color:#ffd166; margin-bottom:6px; min-height:18px; }
+  #joinCodeInput { padding:8px; text-transform:uppercase; width:110px; text-align:center; font-size:16px; border-radius:6px; border:1px solid #555; background:#12141c; color:#eee; }
+  #turnBanner { text-align:center; font-size:18px; font-weight:bold; margin-bottom:10px; min-height:26px; }
+  #mainArea { display:flex; gap:14px; justify-content:center; align-items:flex-start; flex-wrap:wrap; max-width:1200px; margin:0 auto; }
+  .panel { width:230px; background:#1c2030; border-radius:12px; padding:12px; border:2px solid #333; flex-shrink:0; }
+  .panel.activeTurn { border-color:#ffd166; box-shadow:0 0 14px rgba(255,209,102,0.4); }
+  .panel h3 { margin:0 0 8px; font-size:16px; }
+  .waitingBox { display:flex; align-items:center; gap:6px; padding:6px; border-radius:8px; border:2px dashed transparent; cursor:default; margin-bottom:8px; }
+  .waitingBox.movable { border-color:gold; box-shadow:0 0 10px gold; cursor:pointer; }
+  .miniPiece { width:16px; height:16px; border-radius:50%; border:2px solid #fff; }
+  .miniPiece.empty { background:transparent; border-color:#555; }
+  .statLine { font-size:13px; color:#aaa; margin-bottom:8px; }
+  .powerCard { background:#262b3d; border:1px solid #3a3f55; border-radius:8px; padding:8px; margin-bottom:8px; font-size:12px; }
+  .powerCard b { display:block; font-size:13px; margin-bottom:3px; }
+  .powerCard button { width:100%; margin-top:6px; padding:6px; border-radius:6px; border:none; background:#118ab2; color:#fff; font-weight:bold; cursor:pointer; }
+  .powerCard button:disabled { background:#444; color:#888; cursor:not-allowed; }
+  .powerCard.usedCard { opacity:0.5; }
+  .powerCard.armed button { background:#ffd166; color:#222; }
+  #boardWrap { display:flex; flex-direction:column; align-items:center; }
+  .board { position:relative; width:min(480px,80vw); aspect-ratio:1/1; background:#0d0f18; border-radius:16px; border:2px solid #333; }
+  .lines { position:absolute; inset:0; width:100%; height:100%; }
+  .node { position:absolute; width:5.5%; height:5.5%; border-radius:50%; background:#454b63; transform:translate(-50%,-50%); }
+  .node.corner { width:8%; height:8%; background:#6b7290; }
+  .node.center { width:8.5%; height:8.5%; background:#5a5f7a; }
+  .node.diag { background:#3a3f55; }
+  .node.clickable { cursor:pointer; }
+  .node.placeable { background:#f1c40f; box-shadow:0 0 10px #f1c40f; cursor:pointer; }
+  .piece { position:absolute; width:9.5%; height:9.5%; border-radius:50%; transform:translate(-50%,-50%);
+           display:flex; align-items:center; justify-content:center; color:#fff; font-size:11px; font-weight:bold;
+           border:2px solid #fff; box-shadow:0 2px 5px rgba(0,0,0,0.5); cursor:pointer; z-index:5; }
+  .piece.movable { box-shadow:0 0 0 4px gold, 0 2px 5px rgba(0,0,0,0.5); }
+  .piece.targetable { box-shadow:0 0 0 4px #2ecc71, 0 2px 5px rgba(0,0,0,0.5); }
+  .piece.stepping { animation: hopPiece 0.22s ease; }
+  @keyframes hopPiece {
+    0% { transform:translate(-50%,-50%) scale(1); }
+    45% { transform:translate(-50%,-72%) scale(1.18); }
+    100% { transform:translate(-50%,-50%) scale(1); }
+  }
+  .diceAnim { display:flex; gap:10px; justify-content:center; margin:10px 0 4px; perspective:400px; }
+  .diceAnim .stick { width:16px; height:64px; border-radius:5px; background:linear-gradient(#f4e4c1,#d3b98c); border:2px solid #8b6f47;
+    animation: stickFlip 0.32s linear infinite; }
+  .diceAnim .stick:nth-child(2) { animation-delay:0.05s; }
+  .diceAnim .stick:nth-child(3) { animation-delay:0.1s; }
+  .diceAnim .stick:nth-child(4) { animation-delay:0.15s; }
+  @keyframes stickFlip {
+    0% { transform:rotateY(0deg) rotateX(0deg); }
+    100% { transform:rotateY(360deg) rotateX(180deg); }
+  }
+  #diceRollingLabel { font-size:15px; color:#ffd166; font-weight:bold; margin-top:4px; }
+  .icon { position:absolute; transform:translate(-50%,-50%); font-size:16px; z-index:4; pointer-events:none; }
+  #controls { max-width:520px; margin:14px auto; text-align:center; }
+  #diceResult { font-size:20px; font-weight:bold; min-height:30px; margin:8px 0; }
+  #controls button.mainBtn { background:linear-gradient(90deg,#06d6a0,#118ab2); border:none; color:#fff; font-size:16px;
+    font-weight:bold; padding:12px 26px; border-radius:10px; cursor:pointer; margin:6px; }
+  #controls button.mainBtn:disabled { background:#333; color:#777; cursor:not-allowed; }
+  #controls button.subBtn { background:#333; border:1px solid #555; color:#eee; padding:8px 16px; border-radius:8px; cursor:pointer; margin:4px; }
+  #controls button.subBtn:hover { background:#444; }
+  #noticeBox { background:#262b3d; border-radius:8px; padding:10px; margin:10px auto; max-width:480px; font-size:14px; }
+  #log { max-width:600px; margin:16px auto; background:#161a26; border-radius:10px; padding:10px; max-height:160px; overflow-y:auto; font-size:13px; }
+  #log div { padding:3px 0; border-bottom:1px solid #232838; }
+  .modalOverlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:50; }
+  .modalBox { background:#1c2030; border:2px solid #444; border-radius:14px; padding:22px; text-align:center; max-width:340px; }
+  .modalBox h2 { margin-top:0; }
+  .modalBox button { margin:8px; padding:10px 18px; border-radius:8px; border:none; font-weight:bold; cursor:pointer; }
+</style>
+</head>
+<body>
+<h1>⚡ 초능력 윷놀이 ⚡</h1>
+<div id="topBar"><button onclick="handleNewGameClick()">🔄 새 게임</button><button onclick="openLobby()">🌐 온라인 대전</button></div>
+<div id="mpStatus"></div>
+<div id="turnBanner"></div>
+<div id="mainArea">
+  <div class="panel" id="panel0"></div>
+  <div id="boardWrap">
+    <div class="board" id="board"></div>
+    <div id="noticeBox"></div>
+  </div>
+  <div class="panel" id="panel1"></div>
+</div>
+<div id="controls"></div>
+<div id="log"></div>
+<div id="modalLayer"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyB_D2Wi944YQL-1rCdgeNU-tD8lpMek_wM",
+  authDomain: "gwangsu-on.firebaseapp.com",
+  databaseURL: "https://gwangsu-on-default-rtdb.firebaseio.com",
+  projectId: "gwangsu-on",
+  storageBucket: "gwangsu-on.firebasestorage.app",
+  messagingSenderId: "684885628658",
+  appId: "1:684885628658:web:d392c4adf67185f02b626b",
+  measurementId: "G-NWR5SBWHNV"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+</script>
+<script>
+// ---------- board graph ----------
+const NODES = {};
+const CORNER_XY = {0:[90,90],5:[90,10],10:[10,10],15:[10,90]};
+function lerp(a,b,t){ return a+(b-a)*t; }
+[[0,5],[5,10],[10,15],[15,0]].forEach(([a,b])=>{
+  const [ax,ay]=CORNER_XY[a], [bx,by]=CORNER_XY[b];
+  for(let i=0;i<5;i++){
+    const idx=(a+i)%20;
+    const t=i/5;
+    NODES['o'+idx] = {x:lerp(ax,bx,t), y:lerp(ay,by,t)};
+  }
+});
+NODES['C'] = {x:50,y:50};
+function diagPoint(cornerIdx,t){ const [cx,cy]=CORNER_XY[cornerIdx]; return {x:lerp(cx,50,t), y:lerp(cy,50,t)}; }
+NODES['d1'] = diagPoint(5,0.5);
+NODES['d2'] = diagPoint(15,0.5);
+NODES['e1'] = diagPoint(10,0.5);
+NODES['e2'] = diagPoint(0,0.5);
+
+const diag5Nodes = ['o5','d1','C','d2','o15'];
+const diag10Nodes = ['o10','e1','C','e2', null];
+const CORNER_IDS = ['o0','o5','o10','o15'];
+const DIAG_ONLY_IDS = ['d1','d2','e1','e2'];
+
+// ---------- powers ----------
+const POWERS_YUT = [
+ {key:'gaedwaeji', name:'개와 돼지의 시간', desc:'도(1칸)와 개(2칸) 중 원하는 결과를 골라 이동합니다.'},
+ {key:'100horse', name:'100 마력', desc:'걸(3칸)이 나올 확률이 100%가 됩니다.'},
+ {key:'reverse', name:'후진 기어', desc:'뒷도(뒤로 1칸)가 나올 확률이 100%가 됩니다.'},
+ {key:'doubledouble', name:'디스 이스 더블더블', desc:'이번에 던진 결과가 두 배로 적용됩니다. (낙이 나오면 낭비)'},
+ {key:'moordo', name:'모 아니면 도', desc:'모(5칸) 50%, 도(1칸) 50% 확률이 됩니다.'},
+ {key:'midas', name:'마이더스의 손', desc:'윷(4칸) 50%, 모(5칸) 50% 확률이 됩니다.'},
+ {key:'takeout', name:'테이크 아웃', desc:'이번에 던진 결과를 다음 턴에 사용합니다.'},
+ {key:'backstep', name:'백스텝', desc:'던져서 나온 결과 값만큼 뒤로 이동합니다.'}
+];
+const POWERS_MAL = [
+ {key:'gwi', name:'강제 귀가', desc:'상대방 말 하나(업힌 말 포함)를 출발 전 상태로 되돌립니다.'},
+ {key:'eop', name:'업고 가실게요', desc:'내 보드 위 말에 대기 중인 말 하나를 업습니다.'},
+ {key:'swap', name:'자리 좀 바꿔주세요', desc:'내 말과 상대방 말의 위치를 서로 바꿉니다.'},
+ {key:'front', name:'제 앞에 놔주세요', desc:'상대방 말을 내 말 앞 1~3칸 이내로 소환합니다.'},
+ {key:'backhug', name:'백허그', desc:'상대방 말 바로 한 칸 뒤로 내 말을 이동시킵니다.'},
+ {key:'table', name:'밥상 뒤집기', desc:'보드 위 모든 말의 위치를 무작위로 재배치합니다.'},
+ {key:'gate', name:'결승점이 코앞이네', desc:'빈 칸에 결승 게이트를 설치합니다. 밟으면 누구든 즉시 완주!'},
+ {key:'bomb', name:'폭발물 주의', desc:'빈 칸에 폭탄을 설치합니다. 밟거나 지나가면 처음으로 돌아갑니다.'}
+];
+
+// ---------- state ----------
+let players, current, bombs, gates, turnActions, pendingMove, awaitingThrow, awaitingUnitClick,
+    currentUnits, activeYutPower, gaedwaejiActive, selection, showRouteModal, routeModalCorner,
+    _routeResolve, gameOver, winnerIdx, logLines, diceRolling, animatingIds;
+
+const STEP_DELAY = 260;
+const DICE_ROLL_DURATION = 2000;
+function sleep(ms){ return new Promise(resolve=>setTimeout(resolve, ms)); }
+
+// ---------- multiplayer state ----------
+let mpEnabled=false, mySeat=null, myWriterId=null, roomCode=null, roomRef=null,
+    applyingRemote=false, mpSeq=0, lobbyOpen=false;
+
+function isMyTurn(){ return !mpEnabled || mySeat===current; }
+function randomId(){ return Math.random().toString(36).slice(2)+Date.now().toString(36); }
+function genRoomCode(){
+  const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s=''; for(let i=0;i<4;i++) s+=chars[Math.floor(Math.random()*chars.length)];
+  return s;
+}
+function openLobby(){ lobbyOpen=true; render(); }
+function closeLobby(){ lobbyOpen=false; render(); }
+
+function handleNewGameClick(){
+  if(mpEnabled && mySeat!==0){ alert('방장(플레이어 1)만 게임을 다시 시작할 수 있습니다.'); return; }
+  initGame();
+}
+
+function mpCreateRoom(){
+  myWriterId = randomId();
+  roomCode = genRoomCode();
+  mySeat = 0;
+  mpEnabled = true;
+  roomRef = db.ref('rooms/'+roomCode);
+  roomRef.set({ meta:{ host:myWriterId, guest:null } });
+  subscribeRoom();
+  lobbyOpen = false;
+  initGame();
+}
+
+function mpJoinRoom(code){
+  if(!code){ alert('방 코드를 입력하세요.'); return; }
+  code = code.trim().toUpperCase();
+  const metaRef = db.ref('rooms/'+code+'/meta');
+  metaRef.once('value').then(snap=>{
+    const meta = snap.val();
+    if(!meta){ alert('존재하지 않는 방 코드입니다.'); return; }
+    if(meta.guest){ alert('이미 다른 사람이 참가한 방입니다.'); return; }
+    myWriterId = randomId();
+    mySeat = 1;
+    mpEnabled = true;
+    roomCode = code;
+    roomRef = db.ref('rooms/'+code);
+    roomRef.child('meta/guest').set(myWriterId);
+    lobbyOpen = false;
+    logLines = ['🔌 방에 참가했습니다. 방장의 게임 시작을 기다리는 중...'];
+    gameOver=false; players=[makePlayer(0,'플레이어 1','#e74c3c'), makePlayer(1,'플레이어 2','#3498db')];
+    current=0; bombs=[]; gates=[]; awaitingThrow=false; awaitingUnitClick=false; currentUnits=[];
+    activeYutPower=null; gaedwaejiActive=false; selection=null; showRouteModal=false; routeModalCorner=null;
+    diceRolling=false; animatingIds=new Set(); turnActions=[]; pendingMove=null;
+    applyingRemote = true;
+    render();
+    applyingRemote = false;
+    subscribeRoom();
+  });
+}
+
+function subscribeRoom(){
+  roomRef.on('value', snap=>{
+    const data = snap.val();
+    if(!data || !data.state) return;
+    if(data.writerId === myWriterId) return;
+    applyingRemote = true;
+    applyRemoteState(data.state);
+    render();
+    applyingRemote = false;
+  });
+}
+
+function pushStateToFirebase(){
+  if(!mpEnabled || !roomRef) return;
+  mpSeq++;
+  roomRef.update({ state: serializeState(), writerId: myWriterId, seq: mpSeq });
+}
+
+function serializeState(){
+  return {
+    players: players.map(p=>({
+      idx:p.idx, name:p.name, color:p.color,
+      pieces:p.pieces.map(pc=>({id:pc.id, owner:pc.owner, state:pc.state, track:pc.track, idx:pc.idx})),
+      powerYut:p.powerYut, powerMal:p.powerMal, bankedQueue:p.bankedQueue
+    })),
+    current, bombs, gates, turnActions, pendingMove,
+    awaitingThrow, awaitingUnitClick,
+    currentUnits: currentUnits.map(u=>({type:u.type, pieceIds:u.pieces.map(pc=>pc.id)})),
+    activeYutPower, gaedwaejiActive,
+    selection: selection ? {
+      power:selection.power, stage:selection.stage,
+      myNode: selection.myNode||null,
+      myGroupIds: (selection.myGroup||[]).map(pc=>pc.id),
+      refPos: selection.refPos||null,
+      targetGroupIds: (selection.targetGroup||[]).map(pc=>pc.id),
+      targetPos: selection.targetPos||null
+    } : null,
+    showRouteModal, routeModalCorner, gameOver, winnerIdx,
+    logLines, diceRolling, animatingIds:[...animatingIds]
+  };
+}
+
+function applyRemoteState(s){
+  players = s.players.map(p=>({
+    idx:p.idx, name:p.name, color:p.color,
+    pieces:p.pieces.map(pc=>({id:pc.id, owner:pc.owner, state:pc.state, track:pc.track, idx:pc.idx})),
+    powerYut:p.powerYut, powerMal:p.powerMal, bankedQueue:p.bankedQueue||[]
+  }));
+  current = s.current; bombs = s.bombs||[]; gates = s.gates||[];
+  turnActions = s.turnActions||[]; pendingMove = s.pendingMove||null;
+  awaitingThrow = !!s.awaitingThrow; awaitingUnitClick = !!s.awaitingUnitClick;
+  currentUnits = (s.currentUnits||[]).map(u=>({type:u.type, pieces:u.pieceIds.map(findPieceById).filter(Boolean)}));
+  activeYutPower = s.activeYutPower||null; gaedwaejiActive = !!s.gaedwaejiActive;
+  selection = s.selection ? {
+    power:s.selection.power, stage:s.selection.stage,
+    myNode:s.selection.myNode||null, myGroup:(s.selection.myGroupIds||[]).map(findPieceById).filter(Boolean),
+    refPos:s.selection.refPos||null,
+    targetGroup:(s.selection.targetGroupIds||[]).map(findPieceById).filter(Boolean),
+    targetPos:s.selection.targetPos||null
+  } : null;
+  showRouteModal = !!s.showRouteModal; routeModalCorner = s.routeModalCorner||null;
+  gameOver = !!s.gameOver; winnerIdx = (s.winnerIdx===0||s.winnerIdx===1) ? s.winnerIdx : null;
+  logLines = s.logLines||[]; diceRolling = !!s.diceRolling;
+  animatingIds = new Set(s.animatingIds||[]);
+}
+
+function pickRandom(arr){ return {...arr[Math.floor(Math.random()*arr.length)], used:false}; }
+function makePlayer(idx,name,color){
+  return {
+    idx, name, color,
+    pieces:[0,1,2,3].map(i=>({id:idx+'-'+i, owner:idx, state:'waiting', track:null, idx:null})),
+    powerYut: pickRandom(POWERS_YUT),
+    powerMal: pickRandom(POWERS_MAL),
+    bankedQueue: []
+  };
+}
+
+function initGame(){
+  players = [makePlayer(0,'플레이어 1','#e74c3c'), makePlayer(1,'플레이어 2','#3498db')];
+  bombs = []; gates = [];
+  current = 0;
+  pendingMove=null; awaitingThrow=false; awaitingUnitClick=false; currentUnits=[];
+  activeYutPower=null; gaedwaejiActive=false; selection=null;
+  showRouteModal=false; routeModalCorner=null; _routeResolve=null;
+  gameOver=false; winnerIdx=null;
+  diceRolling=false; animatingIds=new Set();
+  logLines = ['🎮 게임을 시작합니다! 각자 초능력 카드를 1장씩 받았습니다.'];
+  startTurn(0);
+}
+
+function log(msg){ logLines.unshift(msg); if(logLines.length>60) logLines.pop(); }
+function allPieces(){ return players[0].pieces.concat(players[1].pieces); }
+function findPieceById(id){ return allPieces().find(p=>p.id===id); }
+function playerName(i){ return players[i].name; }
+
+function nodeIdFromPos(pos){
+  if(!pos) return null;
+  if(pos.track==='main') return 'o'+pos.idx;
+  if(pos.track==='diag5') return diag5Nodes[pos.idx];
+  if(pos.track==='diag10') return diag10Nodes[pos.idx];
+  return null;
+}
+function nodeIdForPiece(p){ if(p.state!=='onboard') return null; return nodeIdFromPos(p); }
+
+function isOccupiedMain(idx){ return allPieces().some(p=>p.state==='onboard' && p.track==='main' && p.idx===idx); }
+function hasBombOrGateAt(node){ return bombs.some(b=>b.node===node) || gates.some(g=>g.node===node); }
+
+// ---------- dry run: find branch corner ----------
+function dryRunFindBranch(pos, steps){
+  let track=pos.track, idx=pos.idx, remaining=steps, used=0;
+  while(remaining>0){
+    if(track==='main' && (idx===5 || idx===10)){
+      return {cornerNum: idx, stepsUsedSoFar: used, stepsRemaining: remaining};
+    }
+    if(track==='main'){ idx++; if(idx>=20){ return null; } }
+    else if(track==='diag5'){ idx++; if(idx>=4){ track='main'; idx=15; } }
+    else if(track==='diag10'){ idx++; if(idx>=4){ return null; } }
+    remaining--; used++;
+  }
+  return null;
+}
+
+// ---------- dice ----------
+function rollNatural(){
+  if(Math.random() < 0.03) return {label:'낙', isNak:true};
+  const specialIdx = 3;
+  let backs=0, specialBack=false;
+  for(let i=0;i<4;i++){
+    const back = Math.random()<0.5;
+    if(back){ backs++; if(i===specialIdx) specialBack=true; }
+  }
+  if(backs===0) return {label:'모', value:5, extra:true, backward:false, isNak:false};
+  if(backs===4) return {label:'윷', value:4, extra:true, backward:false, isNak:false};
+  if(backs===2) return {label:'개', value:2, extra:false, backward:false, isNak:false};
+  if(backs===3) return {label:'걸', value:3, extra:false, backward:false, isNak:false};
+  if(specialBack) return {label:'뒷도', value:1, extra:false, backward:true, isNak:false};
+  return {label:'도', value:1, extra:false, backward:false, isNak:false};
+}
+
+function usePower(){ players[current].powerYut.used=true; }
+function useMalPower(){ players[current].powerMal.used=true; }
+
+function startYutPower(key){
+  if(!awaitingThrow || !isMyTurn()) return;
+  const player=players[current];
+  if(player.powerYut.used || player.powerYut.key!==key) return;
+  if(key==='gaedwaeji'){
+    usePower(); awaitingThrow=false; gaedwaejiActive=true; render(); return;
+  }
+  activeYutPower = key; render();
+}
+
+function chooseGaedwaeji(value){
+  if(!isMyTurn()) return;
+  gaedwaejiActive=false;
+  const label = value===1?'도':'개';
+  log('🎲 개와 돼지의 시간: '+label+'('+value+'칸)을 선택했습니다.');
+  pendingMove = {value, backward:false, _extra:false};
+  render();
+  promptUnitSelection();
+}
+
+async function throwYut(){
+  if(!awaitingThrow || !isMyTurn()) return;
+  awaitingThrow=false;
+  diceRolling=true;
+  render();
+  await sleep(DICE_ROLL_DURATION);
+  diceRolling=false;
+  const player = players[current];
+  let result;
+  if(activeYutPower==='100horse'){ result={label:'걸',value:3,extra:false,backward:false,isNak:false}; usePower(); }
+  else if(activeYutPower==='reverse'){ result={label:'뒷도',value:1,extra:false,backward:true,isNak:false}; usePower(); }
+  else if(activeYutPower==='moordo'){ result = Math.random()<0.5 ? {label:'모',value:5,extra:true,backward:false,isNak:false} : {label:'도',value:1,extra:false,backward:false,isNak:false}; usePower(); }
+  else if(activeYutPower==='midas'){ result = Math.random()<0.5 ? {label:'윷',value:4,extra:true,backward:false,isNak:false} : {label:'모',value:5,extra:true,backward:false,isNak:false}; usePower(); }
+  else if(activeYutPower==='doubledouble'){ result = rollNatural(); usePower(); if(!result.isNak){ result = Object.assign({}, result, {value:result.value*2, label:result.label+' x2'}); } }
+  else if(activeYutPower==='backstep'){ result = rollNatural(); usePower(); if(!result.isNak){ result = Object.assign({}, result, {backward:true}); } }
+  else if(activeYutPower==='takeout'){
+    result = rollNatural(); usePower();
+    if(result.isNak){ log('🎲 낙! 테이크아웃 능력이 낭비되었습니다.'); }
+    else {
+      player.bankedQueue.push({value:result.value, backward:!!result.backward, extra:!!result.extra});
+      log('🎲 '+result.label+'! 테이크아웃으로 다음 턴에 사용하도록 저장했습니다.');
+    }
+    activeYutPower=null; render(); processNext(); return;
+  }
+  else { result = rollNatural(); }
+  activeYutPower = null;
+  if(result.isNak){ log('🎲 낙! 이번 기회를 날렸습니다.'); render(); processNext(); return; }
+  log('🎲 '+result.label+'! ('+(result.backward?'뒤로 ':'')+result.value+'칸'+(result.extra?', 한번 더!':'')+')');
+  pendingMove = {value:result.value, backward:!!result.backward, _extra:!!result.extra};
+  render();
+  promptUnitSelection();
+}
+
+// ---------- unit selection & movement ----------
+function promptUnitSelection(){
+  const p = players[current];
+  const waiting = p.pieces.filter(pc=>pc.state==='waiting');
+  const groups = {};
+  p.pieces.filter(pc=>pc.state==='onboard').forEach(pc=>{
+    const k = pc.track+':'+pc.idx;
+    (groups[k] = groups[k] || []).push(pc);
+  });
+  const units = [];
+  if(waiting.length>0) units.push({type:'new', pieces:[waiting[0]]});
+  Object.values(groups).forEach(g=>units.push({type:'stack', pieces:g}));
+  if(units.length===0){
+    log('이동할 말이 없습니다.');
+    pendingMove=null; render(); processNext(); return;
+  }
+  currentUnits = units;
+  awaitingUnitClick = true;
+  render();
+}
+
+function onWaitingClick(playerIdx){
+  if(!awaitingUnitClick || playerIdx!==current || !isMyTurn()) return;
+  const unit = currentUnits.find(u=>u.type==='new');
+  if(unit){ awaitingUnitClick=false; const mv=pendingMove; performMove(unit.pieces, mv); }
+}
+
+function onPieceClick(pieceId){
+  if(!isMyTurn()) return;
+  const piece = findPieceById(pieceId);
+  if(!piece) return;
+  if(awaitingUnitClick){
+    if(piece.owner!==current || piece.state!=='onboard') return;
+    const nid = nodeIdForPiece(piece);
+    const unit = currentUnits.find(u=>u.type==='stack' && u.pieces[0].owner===piece.owner && nodeIdForPiece(u.pieces[0])===nid);
+    if(unit){ awaitingUnitClick=false; const mv=pendingMove; performMove(unit.pieces, mv); }
+    return;
+  }
+  if(selection){
+    const nid = nodeIdForPiece(piece);
+    const group = piece.state==='onboard' ? allPieces().filter(p=>p.state==='onboard' && p.owner===piece.owner && nodeIdForPiece(p)===nid) : [piece];
+    handlePowerClick(piece, group);
+  }
+}
+
+async function performMove(unitPieces, moveInfo){
+  unitPieces.forEach(p=>animatingIds.add(p.id));
+  let pos;
+  if(unitPieces[0].state==='waiting'){
+    pos = {track:'main', idx:0};
+    unitPieces.forEach(p=>{ p.state='onboard'; p.track='main'; p.idx=0; });
+    render();
+    await sleep(STEP_DELAY);
+  } else {
+    pos = {track:unitPieces[0].track, idx:unitPieces[0].idx};
+  }
+  let bombed=false;
+
+  async function stepPosOnce(){
+    if(pos.track==='main'){ pos.idx++; if(pos.idx>=20){ pos.track='FINISH'; return; } }
+    else if(pos.track==='diag5'){ pos.idx++; if(pos.idx>=4){ pos.track='main'; pos.idx=15; } }
+    else if(pos.track==='diag10'){ pos.idx++; if(pos.idx>=4){ pos.track='FINISH'; return; } }
+    unitPieces.forEach(p=>{ p.track=pos.track; p.idx=pos.idx; });
+    render();
+    await sleep(STEP_DELAY);
+  }
+  async function retreatPosOnce(){
+    if(pos.track==='main'){ pos.idx--; if(pos.idx<0){ pos.track='WAITING'; return; } }
+    else if(pos.track==='diag5'){ pos.idx--; if(pos.idx<0){ pos.track='main'; pos.idx=5; } }
+    else if(pos.track==='diag10'){ pos.idx--; if(pos.idx<0){ pos.track='main'; pos.idx=10; } }
+    unitPieces.forEach(p=>{ p.track=pos.track; p.idx=pos.idx; });
+    render();
+    await sleep(STEP_DELAY);
+  }
+  function checkBomb(){
+    if(pos.track!=='main' && pos.track!=='diag5' && pos.track!=='diag10') return false;
+    const nid = nodeIdFromPos(pos);
+    const bi = bombs.findIndex(b=>b.node===nid);
+    if(bi>=0){ bombs.splice(bi,1); bombed=true; log('💣 폭탄을 밟아 처음으로 돌아갑니다!'); return true; }
+    return false;
+  }
+
+  if(moveInfo.backward){
+    for(let i=0;i<moveInfo.value;i++){
+      await retreatPosOnce();
+      if(pos.track==='WAITING') break;
+      if(checkBomb()) break;
+    }
+  } else {
+    const branch = dryRunFindBranch(pos, moveInfo.value);
+    if(branch){
+      for(let i=0;i<branch.stepsUsedSoFar;i++){
+        await stepPosOnce();
+        if(pos.track==='FINISH') break;
+        if(checkBomb()) break;
+      }
+      if(pos.track!=='FINISH' && !bombed){
+        const takeShortcut = await askRouteChoice(branch.cornerNum);
+        if(takeShortcut){
+          pos.track = branch.cornerNum===5 ? 'diag5' : 'diag10'; pos.idx=0;
+          unitPieces.forEach(p=>{ p.track=pos.track; p.idx=pos.idx; });
+          render();
+          await sleep(STEP_DELAY);
+        }
+        for(let i=0;i<branch.stepsRemaining;i++){
+          await stepPosOnce();
+          if(pos.track==='FINISH') break;
+          if(checkBomb()) break;
+        }
+      }
+    } else {
+      for(let i=0;i<moveInfo.value;i++){
+        await stepPosOnce();
+        if(pos.track==='FINISH') break;
+        if(checkBomb()) break;
+      }
+    }
+  }
+
+  unitPieces.forEach(p=>animatingIds.delete(p.id));
+  let capturedSomething=false;
+  const owner = unitPieces[0].owner;
+  if(bombed || pos.track==='WAITING'){
+    unitPieces.forEach(p=>{ p.state='waiting'; p.track=null; p.idx=null; });
+  } else if(pos.track==='FINISH'){
+    unitPieces.forEach(p=>{ p.state='finished'; p.track=null; p.idx=null; });
+    log('🏁 말이 완주했습니다!');
+    checkWinCondition(owner);
+  } else {
+    const nid = nodeIdFromPos(pos);
+    const gi = gates.findIndex(g=>g.node===nid);
+    if(gi>=0){
+      gates.splice(gi,1);
+      unitPieces.forEach(p=>{ p.state='finished'; p.track=null; p.idx=null; });
+      log('✨ 결승 게이트를 밟아 바로 완주했습니다!');
+      checkWinCondition(owner);
+    } else {
+      unitPieces.forEach(p=>{ p.state='onboard'; p.track=pos.track; p.idx=pos.idx; });
+      allPieces().forEach(p=>{
+        if(p.owner!==owner && p.state==='onboard' && p.track===pos.track && p.idx===pos.idx){
+          p.state='waiting'; p.track=null; p.idx=null; capturedSomething=true;
+        }
+      });
+      if(capturedSomething) log('🎯 상대 말을 잡았습니다! 한 번 더 던집니다.');
+    }
+  }
+  render();
+  const grantExtra = moveInfo._extra || capturedSomething;
+  pendingMove = null;
+  if(grantExtra && !gameOver) turnActions.unshift({type:'throw'});
+  if(!gameOver) processNext();
+}
+
+function askRouteChoice(cornerNum){
+  return new Promise(resolve=>{
+    _routeResolve = resolve;
+    routeModalCorner = cornerNum;
+    showRouteModal = true;
+    render();
+  });
+}
+function chooseRoute(take){
+  if(!isMyTurn()) return;
+  showRouteModal=false;
+  const r=_routeResolve; _routeResolve=null;
+  render();
+  if(r) r(take);
+}
+
+function peekForward(pos, n){
+  let track=pos.track, idx=pos.idx;
+  for(let i=0;i<n;i++){
+    if(track==='main'){ idx++; if(idx>=19) idx=19; }
+    else if(track==='diag5'){ idx++; if(idx>=4){ track='main'; idx=15; } }
+    else if(track==='diag10'){ idx++; if(idx>=4){ track='main'; idx=18; } }
+  }
+  return {track, idx};
+}
+function peekBackward(pos, n){
+  let track=pos.track, idx=pos.idx;
+  for(let i=0;i<n;i++){
+    if(track==='main'){ idx--; if(idx<0) idx=0; }
+    else if(track==='diag5'){ idx--; if(idx<0){ track='main'; idx=5; } }
+    else if(track==='diag10'){ idx--; if(idx<0){ track='main'; idx=10; } }
+  }
+  return {track, idx};
+}
+
+// ---------- mal powers ----------
+function startMalPower(key){
+  if(!awaitingThrow || !isMyTurn()) return;
+  const player = players[current];
+  if(player.powerMal.used || player.powerMal.key!==key) return;
+  if(key==='eop'){
+    const hasWaiting = player.pieces.some(p=>p.state==='waiting');
+    if(!hasWaiting){ alert('업을 수 있는 대기 말이 없습니다.'); return; }
+  }
+  if(key==='table'){ useTablePower(); return; }
+  awaitingThrow=false;
+  selection = {power:key, stage:1, data:{}};
+  render();
+}
+
+function useTablePower(){
+  const list = allPieces().filter(p=>p.state==='onboard');
+  const occ={};
+  list.forEach(p=>{
+    let idx, tries=0;
+    do{ idx = 1+Math.floor(Math.random()*19); tries++; } while(occ[idx]!==undefined && occ[idx]!==p.owner && tries<80);
+    p.track='main'; p.idx=idx; occ[idx]=p.owner;
+  });
+  useMalPower();
+  log('🌀 밥상 뒤집기! 보드 위 모든 말의 위치가 무작위로 바뀌었습니다.');
+  awaitingThrow=false;
+  render();
+  processNext();
+}
+
+function cancelSelection(){
+  if(!isMyTurn()) return;
+  selection=null; awaitingThrow=true; render();
+}
+
+function handlePowerClick(piece, group){
+  const sel = selection;
+  if(!sel) return;
+  const isMine = piece.owner===current;
+  if(sel.power==='gwi'){
+    if(isMine || piece.state!=='onboard'){ alert('상대방의 보드 위 말을 선택하세요.'); return; }
+    group.forEach(p=>{ p.state='waiting'; p.track=null; p.idx=null; });
+    useMalPower(); log('👋 강제 귀가! 상대 말을 출발 전으로 되돌렸습니다.');
+    selection=null; render(); processNext(); return;
+  }
+  if(sel.power==='eop'){
+    if(!isMine || piece.state!=='onboard'){ alert('자신의 보드 위 말을 선택하세요.'); return; }
+    const waiting = players[current].pieces.find(p=>p.state==='waiting');
+    if(!waiting){ alert('업을 대기 말이 없습니다.'); selection=null; render(); return; }
+    waiting.state='onboard'; waiting.track=piece.track; waiting.idx=piece.idx;
+    useMalPower(); log('🐎 업고 가실게요! 대기 중인 말을 업었습니다.');
+    selection=null; render(); processNext(); return;
+  }
+  if(sel.power==='swap'){
+    if(sel.stage===1){
+      if(!isMine || piece.state!=='onboard'){ alert('먼저 자신의 보드 위 말을 선택하세요.'); return; }
+      sel.stage=2; sel.myNode={track:piece.track, idx:piece.idx}; sel.myGroup=group; render(); return;
+    } else {
+      if(isMine || piece.state!=='onboard'){ alert('상대방의 보드 위 말을 선택하세요.'); return; }
+      const aPos=sel.myNode, bPos={track:piece.track, idx:piece.idx};
+      sel.myGroup.forEach(p=>{ p.track=bPos.track; p.idx=bPos.idx; });
+      group.forEach(p=>{ p.track=aPos.track; p.idx=aPos.idx; });
+      useMalPower(); log('🔄 자리 좀 바꿔주세요! 위치를 서로 교체했습니다.');
+      selection=null; render(); processNext(); return;
+    }
+  }
+  if(sel.power==='front'){
+    if(sel.stage===1){
+      if(!isMine || piece.state!=='onboard'){ alert('먼저 자신의 보드 위 말(기준)을 선택하세요.'); return; }
+      sel.stage=2; sel.refPos={track:piece.track, idx:piece.idx}; render(); return;
+    } else if(sel.stage===2){
+      if(isMine || piece.state!=='onboard'){ alert('상대방의 보드 위 말을 선택하세요.'); return; }
+      sel.stage=3; sel.targetGroup=group; render(); return;
+    }
+    return;
+  }
+  if(sel.power==='backhug'){
+    if(isMine || piece.state!=='onboard'){ alert('상대방의 보드 위 말을 선택하세요.'); return; }
+    sel.targetPos={track:piece.track, idx:piece.idx};
+    sel.stage=2; render(); return;
+  }
+}
+
+function chooseFrontOffset(n){
+  if(!isMyTurn()) return;
+  const pos = peekForward(selection.refPos, n);
+  selection.targetGroup.forEach(p=>{ p.track=pos.track; p.idx=pos.idx; });
+  useMalPower(); log('👉 제 앞에 놔주세요! 상대 말을 '+n+'칸 앞으로 소환했습니다.');
+  selection=null; render(); processNext();
+}
+function chooseBackhugPiece(pieceId){
+  if(!isMyTurn()) return;
+  const piece = findPieceById(pieceId);
+  const pos = peekBackward(selection.targetPos, 1);
+  piece.state='onboard'; piece.track=pos.track; piece.idx=pos.idx;
+  useMalPower(); log('🤗 백허그! 상대 말 바로 뒤에 착지했습니다.');
+  selection=null; render(); processNext();
+}
+
+function onNodeClick(idx){
+  if(!selection || !isMyTurn()) return;
+  if(selection.power==='gate' && selection.stage===1){
+    if(idx===0 || isOccupiedMain(idx) || hasBombOrGateAt('o'+idx)){ alert('말이 있거나 이미 장치가 설치된 칸에는 놓을 수 없습니다.'); return; }
+    gates.push({node:'o'+idx});
+    useMalPower(); log('✨ 결승 게이트를 '+idx+'번 칸에 설치했습니다.');
+    selection=null; render(); processNext(); return;
+  }
+  if(selection.power==='bomb' && selection.stage===1){
+    if(idx===0 || isOccupiedMain(idx) || hasBombOrGateAt('o'+idx)){ alert('말이 있거나 이미 장치가 설치된 칸에는 놓을 수 없습니다.'); return; }
+    bombs.push({node:'o'+idx});
+    useMalPower(); log('💣 폭탄을 '+idx+'번 칸에 설치했습니다.');
+    selection=null; render(); processNext(); return;
+  }
+}
+
+// ---------- turn flow ----------
+function checkWinCondition(ownerIdx){
+  if(players[ownerIdx].pieces.every(p=>p.state==='finished')){
+    gameOver=true; winnerIdx=ownerIdx; render();
+  }
+}
+function endTurn(){
+  current = 1-current;
+  startTurn(current);
+}
+function startTurn(idx){
+  current = idx;
+  const player = players[current];
+  if(player.bankedQueue.length>0){
+    turnActions = player.bankedQueue.map(b=>({type:'resolved', value:b.value, backward:b.backward, extra:b.extra}));
+    player.bankedQueue = [];
+    turnActions.push({type:'throw'});
+  } else {
+    turnActions = [{type:'throw'}];
+  }
+  activeYutPower=null; gaedwaejiActive=false; selection=null;
+  log('👉 '+player.name+'의 차례입니다.');
+  render();
+  processNext();
+}
+function processNext(){
+  if(gameOver) return;
+  if(turnActions.length===0){ endTurn(); return; }
+  const action = turnActions.shift();
+  if(action.type==='throw'){
+    awaitingThrow=true; render();
+  } else {
+    pendingMove = {value:action.value, backward:action.backward, _extra:!!action.extra};
+    awaitingThrow=false;
+    log('📦 저장해둔 결과 적용: '+(action.backward?'뒤로 ':'')+action.value+'칸');
+    render();
+    promptUnitSelection();
+  }
+}
+
+// ---------- render ----------
+function render(){
+  renderBanner();
+  renderPanel(0); renderPanel(1);
+  renderBoard();
+  renderControls();
+  renderLog();
+  renderModal();
+  renderMpStatus();
+  if(mpEnabled && !applyingRemote) pushStateToFirebase();
+}
+
+function renderMpStatus(){
+  const el = document.getElementById('mpStatus');
+  if(!mpEnabled){ el.textContent=''; return; }
+  el.textContent = '🌐 온라인 대전 중 · 방 코드: '+roomCode+' · 나는 '+(mySeat===0?'플레이어 1(방장)':'플레이어 2')+(isMyTurn()?' · 내 차례!':' · 상대방 차례');
+}
+
+function renderBanner(){
+  const el = document.getElementById('turnBanner');
+  if(gameOver){ el.textContent=''; return; }
+  const p = players[current];
+  el.innerHTML = '<span style="color:'+p.color+'">● '+p.name+'</span>의 차례';
+}
+
+function pieceIcon(p){ return '●'; }
+
+function renderPanel(idx){
+  const p = players[idx];
+  const el = document.getElementById('panel'+idx);
+  el.className = 'panel' + (current===idx && !gameOver ? ' activeTurn' : '');
+  const waitingCount = p.pieces.filter(x=>x.state==='waiting').length;
+  const finishedCount = p.pieces.filter(x=>x.state==='finished').length;
+  const canMoveWaiting = awaitingUnitClick && current===idx && isMyTurn() && currentUnits.some(u=>u.type==='new');
+  let dots='';
+  for(let i=0;i<4;i++){
+    if(i<finishedCount) dots += '<span class="miniPiece" style="background:'+p.color+';opacity:0.35"></span>';
+    else if(i<finishedCount+waitingCount) dots += '<span class="miniPiece" style="background:'+p.color+'"></span>';
+    else dots += '<span class="miniPiece empty"></span>';
+  }
+  let html = '<h3 style="color:'+p.color+'">● '+p.name+'</h3>';
+  html += '<div class="waitingBox'+(canMoveWaiting?' movable':'')+'" onclick="onWaitingClick('+idx+')">'+dots+'&nbsp; 대기 '+waitingCount+'</div>';
+  html += '<div class="statLine">완주 '+finishedCount+' / 4</div>';
+
+  const yc = p.powerYut, mc = p.powerMal;
+  const yutFull = POWERS_YUT.find(x=>x.key===yc.key);
+  const malFull = POWERS_MAL.find(x=>x.key===mc.key);
+  const armedYut = current===idx && activeYutPower===yc.key;
+  html += '<div class="powerCard'+(yc.used?' usedCard':'')+(armedYut?' armed':'')+'">'
+        + '<b>🌀 '+yutFull.name+'</b>' + yutFull.desc
+        + '<button onclick="startYutPower(\''+yc.key+'\')" '+((current!==idx||!awaitingThrow||yc.used||activeYutPower||gaedwaejiActive||!isMyTurn())?'disabled':'')+'>'
+        + (yc.used?'사용함':(armedYut?'선택됨 - 던지기 클릭':'사용하기'))+'</button></div>';
+  html += '<div class="powerCard'+(mc.used?' usedCard':'')+'">'
+        + '<b>♟️ '+malFull.name+'</b>' + malFull.desc
+        + '<button onclick="startMalPower(\''+mc.key+'\')" '+((current!==idx||!awaitingThrow||mc.used||selection||!isMyTurn())?'disabled':'')+'>'
+        + (mc.used?'사용함':'사용하기')+'</button></div>';
+  el.innerHTML = html;
+}
+
+function renderBoard(){
+  const el = document.getElementById('board');
+  let svg = '<svg class="lines" viewBox="0 0 100 100" preserveAspectRatio="none">';
+  const outerPts = [];
+  for(let i=0;i<20;i++){ outerPts.push(NODES['o'+i].x+','+NODES['o'+i].y); }
+  outerPts.push(NODES['o0'].x+','+NODES['o0'].y);
+  svg += '<polyline points="'+outerPts.join(' ')+'" fill="none" stroke="#3a3f55" stroke-width="1.2"/>';
+  svg += '<polyline points="'+['o5','d1','C','d2','o15'].map(id=>NODES[id].x+','+NODES[id].y).join(' ')+'" fill="none" stroke="#3a3f55" stroke-width="1.2"/>';
+  svg += '<polyline points="'+['o10','e1','C','e2','o0'].map(id=>NODES[id].x+','+NODES[id].y).join(' ')+'" fill="none" stroke="#3a3f55" stroke-width="1.2"/>';
+  svg += '</svg>';
+
+  let nodesHtml = '';
+  const placingMode = selection && isMyTurn() && (selection.power==='gate' || selection.power==='bomb') && selection.stage===1;
+  for(let i=0;i<20;i++){
+    const n = NODES['o'+i];
+    const isCorner = CORNER_IDS.includes('o'+i);
+    let cls = 'node' + (isCorner?' corner':'');
+    let onclick = '';
+    if(i>0){
+      onclick = 'onclick="onNodeClick('+i+')"';
+      if(placingMode){
+        const occupied = isOccupiedMain(i) || hasBombOrGateAt('o'+i);
+        if(!occupied) cls += ' placeable';
+      }
+    }
+    nodesHtml += '<div class="'+cls+'" style="left:'+n.x+'%;top:'+n.y+'%" '+onclick+' title="'+i+'번 칸"></div>';
+  }
+  DIAG_ONLY_IDS.forEach(id=>{
+    const n = NODES[id];
+    nodesHtml += '<div class="node diag" style="left:'+n.x+'%;top:'+n.y+'%"></div>';
+  });
+  nodesHtml += '<div class="node center" style="left:'+NODES.C.x+'%;top:'+NODES.C.y+'%"></div>';
+
+  // bombs & gates icons
+  bombs.forEach(b=>{ const n=NODES[b.node]; nodesHtml += '<div class="icon" style="left:'+n.x+'%;top:'+n.y+'%">💣</div>'; });
+  gates.forEach(g=>{ const n=NODES[g.node]; nodesHtml += '<div class="icon" style="left:'+n.x+'%;top:'+n.y+'%">✨</div>'; });
+
+  // pieces grouped
+  const groups = {};
+  allPieces().filter(p=>p.state==='onboard').forEach(p=>{
+    const nid = nodeIdForPiece(p);
+    const key = nid+'|'+p.owner;
+    (groups[key] = groups[key] || {nid, owner:p.owner, pieces:[]}).pieces.push(p);
+  });
+  let piecesHtml = '';
+  Object.values(groups).forEach(g=>{
+    const n = NODES[g.nid];
+    const owner = players[g.owner];
+    const first = g.pieces[0];
+    let cls = 'piece';
+    if(awaitingUnitClick && g.owner===current && isMyTurn()){
+      const isUnit = currentUnits.some(u=>u.type==='stack' && u.pieces[0].owner===g.owner && nodeIdForPiece(u.pieces[0])===g.nid);
+      if(isUnit) cls += ' movable';
+    }
+    if(selection && isMyTurn()){
+      const needMine = (selection.power==='eop') || (selection.power==='swap' && selection.stage===1) || (selection.power==='front' && selection.stage===1);
+      const needTheirs = (selection.power==='gwi') || (selection.power==='swap' && selection.stage===2) || (selection.power==='front' && selection.stage===2) || (selection.power==='backhug' && selection.stage===1);
+      if(needMine && g.owner===current) cls += ' targetable';
+      if(needTheirs && g.owner!==current) cls += ' targetable';
+    }
+    if(g.pieces.some(p=>animatingIds.has(p.id))) cls += ' stepping';
+    const label = g.pieces.length>1 ? ('x'+g.pieces.length) : '';
+    piecesHtml += '<div class="'+cls+'" style="left:'+n.x+'%;top:'+n.y+'%;background:'+owner.color+'" onclick="onPieceClick(\''+first.id+'\')">'+label+'</div>';
+  });
+
+  el.innerHTML = svg + nodesHtml + piecesHtml;
+}
+
+function renderControls(){
+  const el = document.getElementById('controls');
+  const noticeEl = document.getElementById('noticeBox');
+  let html = '';
+  let notice = '';
+
+  if(!gameOver && diceRolling){
+    notice = '윷을 던지는 중...';
+    html += '<div class="diceAnim"><div class="stick"></div><div class="stick"></div><div class="stick"></div><div class="stick"></div></div>';
+  } else if(!gameOver && !isMyTurn()){
+    if(awaitingThrow) notice = '⏳ 상대방이 윷을 던질 차례입니다...';
+    else if(awaitingUnitClick) notice = '⏳ 상대방이 이동할 말을 선택하고 있습니다...';
+    else if(gaedwaejiActive) notice = '⏳ 상대방이 개와 돼지의 시간 결과를 고르고 있습니다...';
+    else if(selection) notice = '⏳ 상대방이 능력을 사용하고 있습니다...';
+    else notice = '⏳ 상대방의 차례입니다...';
+  } else if(!gameOver){
+    if(awaitingThrow){
+      html += '<button class="mainBtn" onclick="throwYut()">🎲 윷 던지기'+(activeYutPower?' ('+POWERS_YUT.find(x=>x.key===activeYutPower).name+' 적용)':'')+'</button>';
+    } else if(gaedwaejiActive){
+      notice = '개와 돼지의 시간! 원하는 결과를 선택하세요.';
+      html += '<button class="subBtn" onclick="chooseGaedwaeji(1)">도 (1칸)</button>';
+      html += '<button class="subBtn" onclick="chooseGaedwaeji(2)">개 (2칸)</button>';
+    } else if(awaitingUnitClick){
+      notice = '이동할 말을 선택하세요 (보드 위 내 말 또는 대기 칸 클릭)';
+    } else if(selection){
+      const sp = selection.power;
+      if(sp==='gwi') notice = '강제 귀가: 상대방의 보드 위 말을 클릭하세요.';
+      else if(sp==='eop') notice = '업고 가실게요: 업을 내 보드 위 말을 클릭하세요.';
+      else if(sp==='swap') notice = selection.stage===1 ? '자리 바꾸기: 먼저 내 보드 위 말을 클릭하세요.' : '이제 상대방의 보드 위 말을 클릭하세요.';
+      else if(sp==='front'){
+        if(selection.stage===1) notice = '제 앞에 놔주세요: 기준이 될 내 보드 위 말을 클릭하세요.';
+        else if(selection.stage===2) notice = '이제 소환할 상대방의 보드 위 말을 클릭하세요.';
+        else if(selection.stage===3){
+          notice = '몇 칸 앞으로 소환할까요?';
+          html += '<button class="subBtn" onclick="chooseFrontOffset(1)">1칸</button>';
+          html += '<button class="subBtn" onclick="chooseFrontOffset(2)">2칸</button>';
+          html += '<button class="subBtn" onclick="chooseFrontOffset(3)">3칸</button>';
+        }
+      }
+      else if(sp==='backhug'){
+        if(selection.stage===1) notice = '백허그: 상대방의 보드 위 말을 클릭하세요.';
+        else if(selection.stage===2){
+          notice = '어떤 말로 백허그를 할까요?';
+          players[current].pieces.filter(p=>p.state!=='finished').forEach(p=>{
+            const label = p.state==='waiting' ? '대기 말 투입' : '보드의 말 이동';
+            html += '<button class="subBtn" onclick="chooseBackhugPiece(\''+p.id+'\')">'+label+'</button>';
+          });
+        }
+      }
+      else if(sp==='gate') notice = '결승 게이트를 설치할 빈 칸(노란색)을 클릭하세요.';
+      else if(sp==='bomb') notice = '폭탄을 설치할 빈 칸(노란색)을 클릭하세요.';
+      if(selection.stage===1 || (sp==='front'&&selection.stage<=2)) html += '<button class="subBtn" onclick="cancelSelection()">취소</button>';
+    }
+  } else {
+    notice = '';
+  }
+  noticeEl.textContent = notice;
+  el.innerHTML = html;
+}
+
+function renderLog(){
+  document.getElementById('log').innerHTML = logLines.map(l=>'<div>'+l+'</div>').join('');
+}
+
+function renderModal(){
+  const el = document.getElementById('modalLayer');
+  if(lobbyOpen){
+    let body;
+    if(mpEnabled){
+      body = '<p>방 코드: <b style="font-size:22px;letter-spacing:2px;">'+roomCode+'</b></p>'
+           + '<p>나는 '+(mySeat===0?'플레이어 1(방장)':'플레이어 2')+'입니다.<br>이 코드를 상대방에게 알려주세요.</p>';
+    } else {
+      body = '<button class="subBtn" onclick="mpCreateRoom()">➕ 방 만들기</button>'
+           + '<div style="margin:12px 0;color:#888;">또는</div>'
+           + '<input id="joinCodeInput" maxlength="6" placeholder="코드 입력"><br>'
+           + '<button class="subBtn" onclick="mpJoinRoom(document.getElementById(\'joinCodeInput\').value)" style="margin-top:8px;">🚪 참가하기</button>';
+    }
+    el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>🌐 온라인 대전</h2>'
+      + body
+      + '<div style="margin-top:16px;"><button class="subBtn" onclick="closeLobby()">닫기</button></div></div></div>';
+    return;
+  }
+  if(gameOver){
+    const w = players[winnerIdx];
+    el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2 style="color:'+w.color+'">🎉 '+w.name+' 승리!</h2>'
+      + '<button onclick="handleNewGameClick()" style="background:#06d6a0;color:#fff;">다시하기</button></div></div>';
+    return;
+  }
+  if(showRouteModal){
+    if(isMyTurn()){
+      el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>갈림길!</h2>'
+        + '<p>'+routeModalCorner+'번 코너에 도착했습니다.<br>지름길(가운데)로 갈까요?</p>'
+        + '<button onclick="chooseRoute(true)" style="background:#f1c40f;">⚡ 지름길로 가기</button>'
+        + '<button onclick="chooseRoute(false)" style="background:#555;color:#eee;">그냥 가기</button></div></div>';
+    } else {
+      el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>갈림길!</h2>'
+        + '<p>상대방이 '+routeModalCorner+'번 코너에서 경로를 고르고 있습니다...</p></div></div>';
+    }
+    return;
+  }
+  el.innerHTML = '';
+}
+
+window.onload = function(){ initGame(); };
+</script>
+</body>
+</html>
