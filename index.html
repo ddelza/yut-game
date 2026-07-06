@@ -274,7 +274,7 @@ function serializeState(){
 function applyRemoteState(s){
   players = s.players.map(p=>({
     idx:p.idx, name:p.name, color:p.color,
-    pieces:p.pieces.map(pc=>({id:pc.id, owner:pc.owner, state:pc.state, track:pc.track, idx:pc.idx})),
+    pieces:p.pieces.map(pc=>({id:pc.id, owner:pc.owner, state:pc.state, track:(pc.track===undefined?null:pc.track), idx:(pc.idx===undefined?null:pc.idx)})),
     powerYut:p.powerYut, powerMal:p.powerMal, bankedQueue:p.bankedQueue||[]
   }));
   current = s.current; bombs = s.bombs||[]; gates = s.gates||[];
