@@ -25,8 +25,22 @@
   .panel h3 { margin:0 0 8px; font-size:16px; }
   .waitingBox { display:flex; align-items:center; gap:6px; padding:6px; border-radius:8px; border:2px dashed transparent; cursor:default; margin-bottom:8px; }
   .waitingBox.movable { border-color:gold; box-shadow:0 0 10px gold; cursor:pointer; }
-  .miniPiece { width:16px; height:16px; border-radius:50%; border:2px solid #fff; }
+  .miniPiece { width:18px; height:18px; border-radius:50%; border:2px solid #fff; display:inline-flex;
+    align-items:center; justify-content:center; font-size:10px; font-weight:bold; color:#fff; margin-right:2px; }
   .miniPiece.empty { background:transparent; border-color:#555; }
+  .emoteRow { display:flex; gap:4px; justify-content:center; margin-top:8px; flex-wrap:wrap; }
+  .emoteBtn { background:#262b3d; border:1px solid #3a3f55; border-radius:8px; font-size:18px; padding:4px 6px; cursor:pointer; }
+  .emoteBtn:hover { background:#3a3f55; }
+  .emoteBubble { position:fixed; top:40%; transform:translate(-50%,-50%); font-size:56px;
+    background:#1c2030; border:3px solid #ffd166; border-radius:50%; width:100px; height:100px;
+    display:flex; align-items:center; justify-content:center; z-index:70; animation: emotePop 2.2s ease forwards; }
+  @keyframes emotePop {
+    0% { transform:translate(-50%,-50%) scale(0.3); opacity:0; }
+    15% { transform:translate(-50%,-50%) scale(1.2); opacity:1; }
+    25% { transform:translate(-50%,-50%) scale(1); opacity:1; }
+    80% { transform:translate(-50%,-50%) scale(1); opacity:1; }
+    100% { transform:translate(-50%,-60%) scale(0.9); opacity:0; }
+  }
   .statLine { font-size:13px; color:#aaa; margin-bottom:8px; }
   .powerCard { background:#262b3d; border:1px solid #3a3f55; border-radius:8px; padding:8px; margin-bottom:8px; font-size:12px; }
   .powerCard b { display:block; font-size:13px; margin-bottom:3px; }
@@ -202,6 +216,41 @@ function rpsWinnerSeat(c0, c1){
 }
 function rpsEmoji(c){ return c==='가위'?'✌️':(c==='바위'?'✊':'✋'); }
 
+const EMOTES = ['😄','😢','👍','😠','😲','🙏'];
+
+function renamePlayer(){
+  if(!mpEnabled || mySeat==='spectator' || mySeat===null || !players) return;
+  const newName = prompt('새 이름을 입력하세요 (최대 10자):', players[mySeat].name);
+  if(newName===null) return;
+  const trimmed = newName.trim().slice(0,10);
+  if(!trimmed) return;
+  players[mySeat].name = trimmed;
+  render();
+}
+
+function sendEmote(emoji){
+  if(!mpEnabled || mySeat==='spectator' || mySeat===null || !roomRef) return;
+  roomRef.child('emotes').push({seat:mySeat, emoji, ts:Date.now()});
+}
+
+function subscribeEmotes(){
+  roomRef.child('emotes').limitToLast(1).on('child_added', snap=>{
+    const val = snap.val();
+    if(!val) return;
+    if(Date.now() - val.ts > 4000) return;
+    showEmotePopup(val.seat, val.emoji);
+  });
+}
+
+function showEmotePopup(seat, emoji){
+  const bubble = document.createElement('div');
+  bubble.className = 'emoteBubble';
+  bubble.style.left = seat===0 ? '18%' : (seat===1 ? '82%' : '50%');
+  bubble.textContent = emoji;
+  document.body.appendChild(bubble);
+  setTimeout(()=>bubble.remove(), 2300);
+}
+
 function isMyTurn(){ return !mpEnabled || mySeat===current; }
 function randomId(){ return Math.random().toString(36).slice(2)+Date.now().toString(36); }
 function genRoomCode(){
@@ -234,6 +283,7 @@ function mpCreateRoom(){
   subscribeMeta();
   subscribePregame();
   subscribeRoom();
+  subscribeEmotes();
   lobbyOpen = false;
   render();
 }
@@ -241,25 +291,54 @@ function mpCreateRoom(){
 function mpJoinRoom(code){
   if(!code){ alert('방 코드를 입력하세요.'); return; }
   code = code.trim().toUpperCase();
-  const metaRef = db.ref('rooms/'+code+'/meta');
-  metaRef.once('value').then(snap=>{
-    const meta = snap.val();
-    if(!meta){ alert('존재하지 않는 방 코드입니다.'); return; }
-    if(meta.guest){ alert('이미 다른 사람이 참가한 방입니다.'); return; }
+  db.ref('rooms/'+code).once('value').then(snap=>{
+    const data = snap.val();
+    if(!data || !data.meta){ alert('존재하지 않는 방 코드입니다.'); return; }
+    const meta = data.meta;
+    if(!meta.guest){
+      myWriterId = randomId();
+      mySeat = 1;
+      mpEnabled = true;
+      matchPhase = 'waiting';
+      resetPregameVarsLocal();
+      players=null; gameOver=false;
+      roomCode = code;
+      roomRef = db.ref('rooms/'+code);
+      roomRef.child('meta/guest').set(myWriterId);
+      lobbyOpen = false;
+      logLines = ['🔌 방에 참가했습니다.'];
+      subscribeMeta();
+      subscribePregame();
+      subscribeRoom();
+      subscribeEmotes();
+      render();
+      return;
+    }
+    if(!data.state){
+      alert('이미 두 명이 매칭되어 준비 중입니다. 잠시 후 다시 시도해주세요.');
+      return;
+    }
+    const specs = meta.spectators || {};
+    if(Object.keys(specs).length>=4){
+      alert('관전 인원이 가득 찼습니다. (최대 4명)');
+      return;
+    }
     myWriterId = randomId();
-    mySeat = 1;
+    mySeat = 'spectator';
     mpEnabled = true;
-    matchPhase = 'waiting';
-    resetPregameVarsLocal();
-    players=null; gameOver=false;
+    matchPhase = 'playing';
     roomCode = code;
     roomRef = db.ref('rooms/'+code);
-    roomRef.child('meta/guest').set(myWriterId);
+    const mySpecRef = roomRef.child('meta/spectators/'+myWriterId);
+    mySpecRef.set(true);
+    mySpecRef.onDisconnect().remove();
     lobbyOpen = false;
-    logLines = ['🔌 방에 참가했습니다.'];
-    subscribeMeta();
-    subscribePregame();
+    applyingRemote = true;
+    applyRemoteState(data.state);
+    applyingRemote = false;
+    logLines.unshift('👀 관전 모드로 입장했습니다.');
     subscribeRoom();
+    subscribeEmotes();
     render();
   });
 }
@@ -422,7 +501,7 @@ function subscribeRoom(){
 }
 
 function pushStateToFirebase(){
-  if(!mpEnabled || !roomRef) return;
+  if(!mpEnabled || !roomRef || mySeat==='spectator') return;
   mpSeq++;
   roomRef.update({ state: serializeState(), writerId: myWriterId, seq: mpSeq });
 }
@@ -448,7 +527,7 @@ function serializeState(){
       targetPos: selection.targetPos||null
     } : null,
     showRouteModal, routeChoices, gameOver, winnerIdx,
-    logLines, diceRolling, animatingIds:[...animatingIds]
+    logLines, diceRolling, animatingIds:[...animatingIds], bigResultText
   };
 }
 
@@ -475,6 +554,7 @@ function applyRemoteState(s){
   gameOver = !!s.gameOver; winnerIdx = (s.winnerIdx===0||s.winnerIdx===1) ? s.winnerIdx : null;
   logLines = s.logLines||[]; diceRolling = !!s.diceRolling;
   animatingIds = new Set(s.animatingIds||[]);
+  bigResultText = s.bigResultText||null;
 }
 
 function pickRandom(arr){ return {...arr[Math.floor(Math.random()*arr.length)], used:false}; }
@@ -506,6 +586,7 @@ function log(msg){ logLines.unshift(msg); if(logLines.length>60) logLines.pop();
 function allPieces(){ return players[0].pieces.concat(players[1].pieces); }
 function findPieceById(id){ return allPieces().find(p=>p.id===id); }
 function playerName(i){ return players[i].name; }
+function pieceNumber(id){ return parseInt(id.split('-')[1],10)+1; }
 
 function nodeIdFromPos(pos){
   if(!pos) return null;
@@ -1101,6 +1182,10 @@ function renderDrawModal(el){
 function renderMpStatus(){
   const el = document.getElementById('mpStatus');
   if(!mpEnabled){ el.textContent=''; return; }
+  if(mySeat==='spectator'){
+    el.textContent = '👀 관전 중 · 방 코드: '+roomCode;
+    return;
+  }
   const turnInfo = matchPhase==='playing' ? (isMyTurn()?' · 내 차례!':' · 상대방 차례') : '';
   el.textContent = '🌐 온라인 대전 중 · 방 코드: '+roomCode+' · 나는 '+(mySeat===0?'플레이어 1(방장)':'플레이어 2')+turnInfo;
 }
@@ -1122,12 +1207,18 @@ function renderPanel(idx){
   const finishedCount = p.pieces.filter(x=>x.state==='finished').length;
   const canMoveWaiting = awaitingUnitClick && current===idx && isMyTurn() && currentUnits.some(u=>u.type==='new');
   let dots='';
-  for(let i=0;i<4;i++){
-    if(i<finishedCount) dots += '<span class="miniPiece" style="background:'+p.color+';opacity:0.35"></span>';
-    else if(i<finishedCount+waitingCount) dots += '<span class="miniPiece" style="background:'+p.color+'"></span>';
-    else dots += '<span class="miniPiece empty"></span>';
-  }
+  p.pieces.forEach((pc,i)=>{
+    const num = i+1;
+    let style = 'background:'+p.color+';';
+    if(pc.state==='finished') style += 'opacity:0.35;';
+    else if(pc.state==='onboard') style += 'opacity:0.5;border-style:dashed;';
+    dots += '<span class="miniPiece" style="'+style+'">'+num+'</span>';
+  });
   let html = '<h3 style="color:'+p.color+'">● '+p.name+'</h3>';
+  const isMe = mpEnabled && mySeat===idx;
+  if(isMe){
+    html += '<button class="subBtn" onclick="renamePlayer()" style="width:100%;margin:0 0 6px;">✏️ 이름 변경</button>';
+  }
   html += '<div class="waitingBox'+(canMoveWaiting?' movable':'')+'" onclick="onWaitingClick('+idx+')">'+dots+'&nbsp; 대기 '+waitingCount+'</div>';
   html += '<div class="statLine">완주 '+finishedCount+' / 4</div>';
 
@@ -1135,8 +1226,9 @@ function renderPanel(idx){
   const yutFull = POWERS_YUT.find(x=>x.key===yc.key);
   const malFull = POWERS_MAL.find(x=>x.key===mc.key);
   const armedYut = current===idx && activeYutPower===yc.key;
-  const hideYut = mpEnabled && idx!==mySeat && !yc.used;
-  const hideMal = mpEnabled && idx!==mySeat && !mc.used;
+  const isSpectator = mpEnabled && mySeat==='spectator';
+  const hideYut = mpEnabled && !isSpectator && idx!==mySeat && !yc.used;
+  const hideMal = mpEnabled && !isSpectator && idx!==mySeat && !mc.used;
   html += '<div class="powerCard'+(yc.used?' usedCard':'')+(armedYut?' armed':'')+(hideYut?' hiddenPower':'')+'">'
         + '<b>🌀 '+(hideYut?'??? (비공개)':yutFull.name)+'</b>' + (hideYut?'상대방의 능력은 사용 전까지 볼 수 없습니다.':yutFull.desc)
         + '<button onclick="startYutPower(\''+yc.key+'\')" '+((current!==idx||!awaitingThrow||yc.used||activeYutPower||gaedwaejiActive||!isMyTurn())?'disabled':'')+'>'
@@ -1145,6 +1237,9 @@ function renderPanel(idx){
         + '<b>♟️ '+(hideMal?'??? (비공개)':malFull.name)+'</b>' + (hideMal?'상대방의 능력은 사용 전까지 볼 수 없습니다.':malFull.desc)
         + '<button onclick="startMalPower(\''+mc.key+'\')" '+((current!==idx||!awaitingThrow||mc.used||selection||!isMyTurn())?'disabled':'')+'>'
         + (mc.used?'사용함':'사용하기')+'</button></div>';
+  if(isMe){
+    html += '<div class="emoteRow">' + EMOTES.map(e=>'<button class="emoteBtn" onclick="sendEmote(\''+e+'\')">'+e+'</button>').join('') + '</div>';
+  }
   el.innerHTML = html;
 }
 
@@ -1209,7 +1304,7 @@ function renderBoard(){
       if(needTheirs && g.owner!==current) cls += ' targetable';
     }
     if(g.pieces.some(p=>animatingIds.has(p.id))) cls += ' stepping';
-    const label = g.pieces.length>1 ? ('x'+g.pieces.length) : '';
+    const label = g.pieces.map(p=>pieceNumber(p.id)).sort((a,b)=>a-b).join(',');
     piecesHtml += '<div class="'+cls+'" style="left:'+n.x+'%;top:'+n.y+'%;background:'+owner.color+'" onclick="onPieceClick(\''+first.id+'\')">'+label+'</div>';
   });
 
