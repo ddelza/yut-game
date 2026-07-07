@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>초능력 윷놀이 - 학생용 가이드</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin:0; padding:16px; font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;
+    background: radial-gradient(circle at top, #232838 0%, #12141c 70%);
+    color:#eee; min-height:100vh;
+  }
+  .wrap { max-width:760px; margin:0 auto; }
+  h1 { text-align:center; margin:4px 0 6px; font-size:26px; letter-spacing:1px;
+       background:linear-gradient(90deg,#ffd166,#06d6a0,#118ab2); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .sub { text-align:center; color:#aaa; font-size:14px; margin-bottom:18px; }
+  .backLink { display:block; text-align:center; margin-bottom:18px; }
+  .backLink a { color:#06d6a0; text-decoration:none; font-weight:bold; }
+  .backLink a:hover { text-decoration:underline; }
+  details { background:#1c2030; border:2px solid #333; border-radius:12px; margin-bottom:12px; overflow:hidden; }
+  details[open] { border-color:#ffd166; }
+  summary { cursor:pointer; padding:14px 18px; font-size:16px; font-weight:bold; list-style:none;
+            display:flex; align-items:center; justify-content:space-between; }
+  summary::-webkit-details-marker { display:none; }
+  summary::after { content:'▶ 펼쳐보기'; font-size:12px; font-weight:normal; color:#888; }
+  details[open] summary::after { content:'▼ 접기'; color:#ffd166; }
+  summary:hover { background:#262b3d; }
+  .content { padding:4px 20px 20px; font-size:14.5px; line-height:1.7; }
+  .content h3 { color:#ffd166; font-size:15px; margin:14px 0 6px; }
+  .content ul { margin:6px 0; padding-left:22px; }
+  .content li { margin-bottom:6px; }
+  table { width:100%; border-collapse:collapse; margin:10px 0; font-size:14px; }
+  th, td { border:1px solid #3a3f55; padding:8px 10px; text-align:left; }
+  th { background:#262b3d; color:#ffd166; }
+  tr:nth-child(even) td { background:#20243a; }
+  .powerCard { background:#262b3d; border:1px solid #3a3f55; border-radius:8px; padding:10px 12px; margin-bottom:8px; }
+  .powerCard b { display:block; color:#06d6a0; margin-bottom:3px; }
+  .tipList li { color:#dfe; }
+  footer { text-align:center; color:#666; font-size:12px; margin-top:24px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⚡ 초능력 윷놀이 ⚡</h1>
+  <div class="sub">학생용 가이드 — 규칙 · 확률 · 초능력 · 팁</div>
+  <div class="backLink"><a href="index.html">← 게임으로 돌아가기</a></div>
+
+  <details open>
+    <summary>1. 게임의 기본 흐름</summary>
+    <div class="content">
+      <ul>
+        <li>나와 상대(또는 우리 팀과 상대 팀)는 각각 말 4개를 가지고 시작합니다.</li>
+        <li>번갈아 가며 윷을 던지고, 나온 만큼 말을 이동시켜 4개를 먼저 전부 결승선까지 통과시키면 승리!</li>
+        <li>게임 시작 시 각자 초능력 카드를 2장 받습니다: 윷의 힘 1장 + 말의 힘 1장. 각 카드는 게임 중 딱 한 번만 쓸 수 있어요.</li>
+        <li>온라인 대전에서는 상대가 아직 안 쓴 초능력이 무엇인지 안 보여요. 사용하는 순간 공개됩니다!</li>
+      </ul>
+    </div>
+  </details>
+
+  <details>
+    <summary>2. 윷 던지기 결과와 확률</summary>
+    <div class="content">
+      <p>윷가락 4개를 던지면 아래 7가지 중 하나가 나옵니다. 표의 확률은 실제 이 게임에서 계산된 값이에요.</p>
+      <table>
+        <tr><th>결과</th><th>효과</th><th>확률</th></tr>
+        <tr><td>모</td><td>5칸 전진 + 한 번 더 던지기</td><td>약 6.1%</td></tr>
+        <tr><td>윷</td><td>4칸 전진 + 한 번 더 던지기</td><td>약 6.1%</td></tr>
+        <tr><td>걸</td><td>3칸 전진</td><td>약 24.3%</td></tr>
+        <tr><td>개</td><td>2칸 전진 (제일 자주 나옴)</td><td>약 36.4%</td></tr>
+        <tr><td>도</td><td>1칸 전진</td><td>약 18.2%</td></tr>
+        <tr><td>뒷도</td><td>1칸 후진</td><td>약 6.1%</td></tr>
+        <tr><td>낙</td><td>무효! 이번 기회 날아감</td><td>약 3.0%</td></tr>
+      </table>
+      <p>왜 '개'가 제일 잘 나올까요? 윷가락 4개 중 몇 개가 뒤집히는지로 결과가 정해지는데, 동전 4개를 던졌을 때
+      '앞면 2개·뒷면 2개'가 나올 확률이 제일 높은 것과 같은 원리예요. 반대로 모(전부 한쪽)와 윷(전부 반대쪽)은
+      제일 드물게 나옵니다. 또 4개 중 하나는 특별히 작은 가락이라서, 그 가락 하나만 뒤집히면 도 대신
+      '뒷도'(뒤로 감)가 됩니다.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>3. 이동 규칙</summary>
+    <div class="content">
+      <h3>3.1 지름길</h3>
+      <ul>
+        <li>보드에는 4개 모서리와 가운데(센터)를 잇는 대각선 지름길이 있어요.</li>
+        <li>지름길을 타려면 갈림길 칸(5번, 10번, 센터)에 정확히 멈춰야 합니다! 그냥 지나쳐 버리면 다음에 탈 기회가 없어요.</li>
+        <li>정확히 멈추면 다음에 그 말을 움직일 때 화살표 버튼으로 방향을 고를 수 있어요.</li>
+        <li>10번 코너 지름길은 센터를 거쳐 결승선(0번)으로 바로 이어지는 가장 강력한 지름길입니다!</li>
+        <li>센터에 정확히 멈추면 왼쪽 아래(15번 코너 방향) 또는 오른쪽 아래(결승 방향) 중 골라서 갈 수 있어요.</li>
+      </ul>
+      <h3>3.2 결승선</h3>
+      <ul>
+        <li>결승선(출발점과 같은 자리)에 정확히 도착하면 아직 완주가 아니에요! 그 칸에서 대기 상태가 됩니다.</li>
+        <li>그 말을 다음에 1칸이라도 더 움직이면 그때 완주됩니다.</li>
+        <li>결승선을 넘어서 지나가버리면(예: 딱 맞는 칸 수보다 더 크게 나온 경우) 그 자리에서 바로 완주돼요.</li>
+        <li>결승선에서 대기 중인 말도 상대에게 잡힐 수 있으니 방심 금지! 뒷도로 잡고 나서 다음 턴에 완주하는 것도 가능해요.</li>
+      </ul>
+      <h3>3.3 잡기</h3>
+      <ul>
+        <li>이동해서 정확히 도착한 칸에 상대 말이 있으면 그 말을 잡아 처음(대기 상태)으로 돌려보냅니다.</li>
+        <li>말을 잡으면 보너스로 한 번 더 던질 수 있어요!</li>
+        <li>내 말끼리 같은 칸에 모이면 하나로 합쳐져서(업힌 것처럼) 항상 같이 움직입니다.</li>
+      </ul>
+      <h3>3.4 윷/모가 나오면?</h3>
+      <ul>
+        <li>윷이나 모가 나와도 바로 말을 옮기지 않아요. 일단 한 번 더 던집니다.</li>
+        <li>더 이상 윷/모가 안 나올 때까지 이렇게 계속 쌓이고, 그 다음에 쌓인 결과들을 원하는 순서로 골라 원하는 말에 나눠 쓸 수 있어요.</li>
+        <li>예: 윷(4칸) 다음에 걸(3칸)이 나왔다면, 4칸을 A말에, 3칸을 B말에 나눠 쓰는 것도 가능!</li>
+      </ul>
+    </div>
+  </details>
+
+  <details>
+    <summary>4. 초능력 — 윷을 다스리는 힘 (8종)</summary>
+    <div class="content">
+      <p>이 초능력은 '윷 던지기 결과'를 바꾸는 능력이에요. 대부분 던지기 전에 미리 켜둬야 효과가 적용됩니다.</p>
+      <div class="powerCard"><b>개와 돼지의 시간</b>안 던지고 도(1칸)나 개(2칸) 중 원하는 걸 바로 선택. 확실하게 필요한 만큼 갈 수 있어요.</div>
+      <div class="powerCard"><b>100 마력</b>다음 던지기가 무조건 걸(3칸)이 됩니다.</div>
+      <div class="powerCard"><b>후진 기어</b>다음 던지기가 무조건 뒷도(뒤로 1칸)가 됩니다. 상대 말을 뒤에서 잡을 때 확실하게 쓰기 좋아요.</div>
+      <div class="powerCard"><b>디스 이스 더블더블</b>던진 결과를 2번 나눠 쓸 수 있어요 (같은 말에 이어 써도 되고, 다른 말에 나눠 써도 됨). 낙이 나오면 그냥 낭비돼요.</div>
+      <div class="powerCard"><b>모 아니면 도</b>모(5칸) 또는 도(1칸) 둘 중 하나가 절반씩 확률로 나옵니다.</div>
+      <div class="powerCard"><b>마이더스의 손</b>윷(4칸) 또는 모(5칸) 둘 중 하나가 절반씩 확률로 나옵니다. 둘 다 크게 전진하니 이득!</div>
+      <div class="powerCard"><b>테이크 아웃</b>이번에 던진 결과를 지금 안 쓰고 다음 내 턴으로 저장해둡니다.</div>
+      <div class="powerCard"><b>백스텝</b>던진 만큼 앞이 아니라 뒤로 이동합니다.</div>
+    </div>
+  </details>
+
+  <details>
+    <summary>5. 초능력 — 말을 다스리는 힘 (8종)</summary>
+    <div class="content">
+      <p>이 초능력은 던지기와 상관없이 말의 위치를 직접 조작하는 능력이에요.</p>
+      <div class="powerCard"><b>강제 귀가</b>상대 말 하나를 바로 처음(대기 상태)으로 돌려보냅니다.</div>
+      <div class="powerCard"><b>업고 가실게요</b>내 보드 위 말에 대기 중인 말 하나를 업혀서 같이 다니게 합니다.</div>
+      <div class="powerCard"><b>자리 좀 바꿔주세요</b>내 말과 상대 말의 위치를 서로 맞바꿉니다. 위기 탈출이나 역전에 아주 강력해요!</div>
+      <div class="powerCard"><b>제 앞에 놔주세요</b>내 말 앞 1~3칸 안으로 상대 말을 소환합니다 (다음에 잡기 좋은 위치로).</div>
+      <div class="powerCard"><b>백허그</b>상대 말 바로 뒤 한 칸으로 내 말을 이동시킵니다. 다음 턴에 잡기 딱 좋은 위치!</div>
+      <div class="powerCard"><b>밥상 뒤집기</b>보드 위 모든 말의 위치를 랜덤으로 뒤섞어 버립니다. 판이 불리할 때 한 방을 노려볼 수 있어요.</div>
+      <div class="powerCard"><b>결승점이 코앞이네</b>빈 칸에 결승 게이트를 설치합니다. 누구든 그 칸을 밟으면 바로 완주!</div>
+      <div class="powerCard"><b>폭발물 주의</b>빈 칸에 폭탄을 설치합니다. 누구든 밟거나 지나가기만 해도 처음으로 돌아갑니다 (내 말이 밟아도 당해요!).</div>
+    </div>
+  </details>
+
+  <details>
+    <summary>6. 게임 팁</summary>
+    <div class="content">
+      <ul class="tipList">
+        <li>초반엔 말을 빨리 꺼내는 게 좋아요. 개(36%)와 걸(24%)이 자주 나오니 말을 여러 개 풀어두면 다음 턴에 선택지가 많아집니다.</li>
+        <li>지름길은 화끈하지만 위험도 있어요 — 정확히 멈춰야 다음에 탈 수 있으니, 갈림길 칸에 딱 도착하도록 칸 수를 계산해보세요.</li>
+        <li>10번 코너 지름길(→ 센터 → 결승)이 가장 빠른 길입니다. 이 자리를 선점하면 큰 이득이에요.</li>
+        <li>결승선 앞이라고 방심하지 마세요 — 완주 전까지는 계속 잡힐 수 있는 '보드 위' 상태입니다.</li>
+        <li>상대가 아직 능력을 안 썼다면 무엇을 가지고 있을지 예상하면서 플레이하세요. 능력은 딱 한 번 쓰는 게 다니까, 상대도 신중하게 아끼고 있을 거예요.</li>
+        <li>말을 잡으면 보너스 던지기가 생기니, 상대 말을 잡을 수 있는 상황이면 적극적으로 노려보세요.</li>
+        <li>윷/모가 연달아 나오면 여러 말을 한꺼번에 진출시킬 절호의 기회입니다. 어떤 말에 어떤 값을 쓸지 잘 배분하세요.</li>
+        <li>'말을 다스리는 힘' 능력들은 대부분 즉시 판을 뒤집는 효과라서, 상대가 거의 이겼을 때 아껴뒀다가 쓰면 반전을 노릴 수 있어요.</li>
+      </ul>
+    </div>
+  </details>
+
+  <footer>초능력 윷놀이 · <a href="index.html" style="color:#666;">게임으로 돌아가기</a></footer>
+</div>
+</body>
+</html>
