@@ -216,6 +216,48 @@ function sleep(ms){ return new Promise(resolve=>setTimeout(resolve, ms)); }
 let mpEnabled=false, mySeat=null, myWriterId=null, roomCode=null, roomRef=null,
     applyingRemote=false, mpSeq=0, lobbyOpen=false;
 
+// ---------- team mode state ----------
+let teamMode=false, myRole=null, isRoomCreator=false, teamRoles={0:{},1:{}}, teamGateOpen=false;
+function isTeamMode(){ return !!teamMode; }
+function canActRole(role){ return !teamMode || myRole===role; }
+function roleName(n){ return {1:'윷 던지는 사람',2:'말 옮기는 사람',3:'초능력 쓰는 사람',4:'감정표현 담당'}[n] || ''; }
+function teamFullCount(teamIdx){ const r=teamRoles[teamIdx]||{}; return [1,2,3,4].filter(k=>r[k]).length; }
+function teamHasUnusedPower(seatIdx){ const p=players[seatIdx]; return !p.powerYut.used || !p.powerMal.used; }
+function currentRoleNeeded(){
+  if(!teamMode) return null;
+  if(teamGateOpen) return 3;
+  if(awaitingThrow) return 1;
+  if(gaedwaejiActive) return 3;
+  if(selection) return 3;
+  if(showRouteModal) return 2;
+  if(awaitingResolveChoice || awaitingUnitClick) return 2;
+  return null;
+}
+function isMyActionNow(){
+  if(!isMyTurn()) return false;
+  if(!teamMode) return true;
+  const needed = currentRoleNeeded();
+  return needed===null || myRole===needed;
+}
+function chooseTeam(teamIdx){
+  if(mySeat!==null) return;
+  if(teamFullCount(teamIdx)>=4) return;
+  mySeat = teamIdx;
+  render();
+}
+function chooseRole(roleNum){
+  if(mySeat===null || myRole!==null) return;
+  const ref = db.ref('rooms/'+roomCode+'/meta/roles/'+mySeat+'/'+roleNum);
+  ref.transaction(cur=> cur ? undefined : myWriterId).then(result=>{
+    if(result.committed && result.snapshot.val()===myWriterId){
+      myRole = roleNum;
+      render();
+    } else {
+      alert('이미 다른 사람이 선택한 역할입니다.');
+    }
+  });
+}
+
 // pregame (waiting / rock-paper-scissors / power draw) state
 let matchPhase=null; // null(local) | 'waiting' | 'rps' | 'draw' | 'playing'
 let pregameData={}, lastResetSeq=0;
@@ -237,6 +279,7 @@ const EMOTES = ['😄','😢','👍','😠','😲','🙏'];
 
 function renamePlayer(){
   if(!mpEnabled || mySeat==='spectator' || mySeat===null || !players) return;
+  if(teamMode && !canActRole(4)) return;
   const newName = prompt('새 이름을 입력하세요 (최대 10자):', players[mySeat].name);
   if(newName===null) return;
   const trimmed = newName.trim().slice(0,10);
@@ -247,6 +290,7 @@ function renamePlayer(){
 
 function sendEmote(emoji){
   if(!mpEnabled || mySeat==='spectator' || mySeat===null || !roomRef) return;
+  if(teamMode && !canActRole(4)) return;
   roomRef.child('emotes').push({seat:mySeat, emoji, ts:Date.now()});
 }
 
@@ -280,7 +324,11 @@ function closeLobby(){ lobbyOpen=false; render(); }
 
 function handleNewGameClick(){
   if(mpEnabled){
-    if(mySeat!==0){ alert('방장(플레이어 1)만 게임을 다시 시작할 수 있습니다.'); return; }
+    if(teamMode){
+      if(!isRoomCreator){ alert('방을 만든 사람만 다시 시작할 수 있습니다.'); return; }
+    } else if(mySeat!==0){
+      alert('방장(플레이어 1)만 게임을 다시 시작할 수 있습니다.'); return;
+    }
     mpRestartMatch();
     return;
   }
@@ -292,11 +340,32 @@ function mpCreateRoom(){
   roomCode = genRoomCode();
   mySeat = 0;
   mpEnabled = true;
+  teamMode = false; myRole = null; isRoomCreator = true;
   matchPhase = 'waiting';
   resetPregameVarsLocal();
   players=null; gameOver=false;
   roomRef = db.ref('rooms/'+roomCode);
-  roomRef.set({ meta:{ host:myWriterId, guest:null } });
+  roomRef.set({ meta:{ mode:'solo', host:myWriterId, guest:null } });
+  subscribeMeta();
+  subscribePregame();
+  subscribeRoom();
+  subscribeEmotes();
+  lobbyOpen = false;
+  render();
+}
+
+function mpCreateTeamRoom(){
+  myWriterId = randomId();
+  roomCode = genRoomCode();
+  mySeat = null; myRole = null;
+  mpEnabled = true;
+  teamMode = true; isRoomCreator = true;
+  matchPhase = 'teamSelect';
+  teamRoles = {0:{},1:{}};
+  resetPregameVarsLocal();
+  players=null; gameOver=false;
+  roomRef = db.ref('rooms/'+roomCode);
+  roomRef.set({ meta:{ mode:'team', creator:myWriterId, roles:{0:{1:null,2:null,3:null,4:null},1:{1:null,2:null,3:null,4:null}} } });
   subscribeMeta();
   subscribePregame();
   subscribeRoom();
@@ -312,10 +381,12 @@ function mpJoinRoom(code){
     const data = snap.val();
     if(!data || !data.meta){ alert('존재하지 않는 방 코드입니다.'); return; }
     const meta = data.meta;
+    if(meta.mode==='team'){ joinTeamRoomFlow(code, data); return; }
     if(!meta.guest){
       myWriterId = randomId();
       mySeat = 1;
       mpEnabled = true;
+      teamMode = false; myRole = null; isRoomCreator = false;
       matchPhase = 'waiting';
       resetPregameVarsLocal();
       players=null; gameOver=false;
@@ -343,6 +414,7 @@ function mpJoinRoom(code){
     myWriterId = randomId();
     mySeat = 'spectator';
     mpEnabled = true;
+    teamMode = false; myRole = null; isRoomCreator = false;
     matchPhase = 'playing';
     roomCode = code;
     roomRef = db.ref('rooms/'+code);
@@ -360,6 +432,50 @@ function mpJoinRoom(code){
   });
 }
 
+function joinTeamRoomFlow(code, data){
+  const meta = data.meta;
+  const roles = meta.roles || {0:{},1:{}};
+  const allFilled = [0,1].every(t => [1,2,3,4].every(r => roles[t] && roles[t][r]));
+  if(allFilled){
+    if(!data.state){ alert('두 팀이 이미 매칭되어 준비 중입니다. 잠시 후 다시 시도해주세요.'); return; }
+    const specs = meta.spectators || {};
+    if(Object.keys(specs).length>=4){ alert('관전 인원이 가득 찼습니다. (최대 4명)'); return; }
+    myWriterId = randomId();
+    mySeat = 'spectator'; myRole = null;
+    mpEnabled = true; teamMode = true; isRoomCreator = false;
+    matchPhase = 'playing';
+    roomCode = code;
+    roomRef = db.ref('rooms/'+code);
+    const mySpecRef = roomRef.child('meta/spectators/'+myWriterId);
+    mySpecRef.set(true);
+    mySpecRef.onDisconnect().remove();
+    lobbyOpen = false;
+    applyingRemote = true;
+    applyRemoteState(data.state);
+    applyingRemote = false;
+    logLines.unshift('👀 관전 모드로 입장했습니다.');
+    subscribeRoom();
+    subscribeEmotes();
+    render();
+    return;
+  }
+  myWriterId = randomId();
+  mpEnabled = true; teamMode = true; isRoomCreator = false;
+  matchPhase = 'teamSelect';
+  mySeat = null; myRole = null;
+  teamRoles = roles;
+  resetPregameVarsLocal();
+  players = null; gameOver = false;
+  roomCode = code;
+  roomRef = db.ref('rooms/'+code);
+  lobbyOpen = false;
+  subscribeMeta();
+  subscribePregame();
+  subscribeRoom();
+  subscribeEmotes();
+  render();
+}
+
 function resetPregameVarsLocal(){
   rpsRound=0; myRpsChosen=false; rpsResolved=false; rpsRevealData=null; rpsCountdown=null; rpsTieHandled=false;
   matchStartingSeat=null; myDraw={yut:null,mal:null}; drawSpinning=false; matchStarted=false;
@@ -368,10 +484,20 @@ function resetPregameVarsLocal(){
 function subscribeMeta(){
   db.ref('rooms/'+roomCode+'/meta').on('value', snap=>{
     const meta = snap.val();
-    const opponentPresent = !!(meta && meta.host && meta.guest);
-    if(opponentPresent && matchPhase==='waiting'){
-      matchPhase = 'rps';
-      log('🤝 상대방이 입장했습니다! 가위바위보로 선공을 정합니다.');
+    if(!meta){ render(); return; }
+    if(teamMode){
+      teamRoles = meta.roles || {0:{},1:{}};
+      const allFilled = [0,1].every(t => [1,2,3,4].every(r => teamRoles[t] && teamRoles[t][r]));
+      if(allFilled && matchPhase==='teamSelect'){
+        matchPhase = 'rps';
+        log('🤝 모든 역할이 정해졌습니다! 가위바위보로 선공을 정합니다.');
+      }
+    } else {
+      const opponentPresent = !!(meta.host && meta.guest);
+      if(opponentPresent && matchPhase==='waiting'){
+        matchPhase = 'rps';
+        log('🤝 상대방이 입장했습니다! 가위바위보로 선공을 정합니다.');
+      }
     }
     render();
   });
@@ -438,13 +564,17 @@ function runRpsCountdown(c0, c1, w){
 }
 
 function chooseRps(choice){
+  if(teamMode && !canActRole(4)) return;
   if(myRpsChosen) return;
+  const teamChosen = !!(pregameData.rps && pregameData.rps[rpsRound] && pregameData.rps[rpsRound][mySeat]);
+  if(teamChosen) return;
   myRpsChosen = true;
   db.ref('rooms/'+roomCode+'/pregame/rps/'+rpsRound+'/'+mySeat).set(choice);
   render();
 }
 
 function startDraw(){
+  if(teamMode && !canActRole(3)) return;
   if(myDraw.yut || drawSpinning) return;
   drawSpinning = true;
   render();
@@ -544,7 +674,7 @@ function serializeState(){
       targetPos: selection.targetPos||null
     } : null,
     showRouteModal, routeChoices, gameOver, winnerIdx,
-    logLines, diceRolling, animatingIds:[...animatingIds], bigResultText, scoreTally
+    logLines, diceRolling, animatingIds:[...animatingIds], bigResultText, scoreTally, teamGateOpen
   };
 }
 
@@ -573,6 +703,7 @@ function applyRemoteState(s){
   animatingIds = new Set(s.animatingIds||[]);
   bigResultText = s.bigResultText||null;
   scoreTally = s.scoreTally||null;
+  teamGateOpen = !!s.teamGateOpen;
 }
 
 function pickRandom(arr){ return {...arr[Math.floor(Math.random()*arr.length)], used:false}; }
@@ -662,17 +793,27 @@ function usePower(){ players[current].powerYut.used=true; }
 function useMalPower(){ players[current].powerMal.used=true; }
 
 function startYutPower(key){
-  if(!awaitingThrow || !isMyTurn()) return;
+  if(!isMyTurn()) return;
+  if(teamMode){
+    if(!teamGateOpen || !canActRole(3)) return;
+  } else if(!awaitingThrow){
+    return;
+  }
   const player=players[current];
   if(player.powerYut.used || player.powerYut.key!==key) return;
   if(key==='gaedwaeji'){
-    usePower(); awaitingThrow=false; gaedwaejiActive=true; render(); return;
+    usePower();
+    if(teamMode) teamGateOpen=false;
+    awaitingThrow=false; gaedwaejiActive=true; render(); return;
   }
-  activeYutPower = key; render();
+  activeYutPower = key;
+  if(teamMode){ teamGateOpen=false; awaitingThrow=true; }
+  render();
 }
 
 async function chooseGaedwaeji(value){
   if(!isMyTurn()) return;
+  if(teamMode && !canActRole(3)) return;
   gaedwaejiActive=false;
   owedThrows--;
   const label = value===1?'도':'개';
@@ -688,6 +829,7 @@ async function chooseGaedwaeji(value){
 
 async function throwYut(){
   if(!awaitingThrow || !isMyTurn() || owedThrows<=0) return;
+  if(teamMode && !canActRole(1)) return;
   awaitingThrow=false;
   owedThrows--;
   diceRolling=true;
@@ -740,19 +882,35 @@ function advanceTurnFlow(){
   if(gameOver) return;
   awaitingResolveChoice = false;
   if(owedThrows>0){
+    if(teamMode && teamHasUnusedPower(current)){
+      awaitingThrow = false; awaitingUnitClick = false;
+      teamGateOpen = true;
+      render();
+      return;
+    }
+    teamGateOpen = false;
     awaitingThrow = true; awaitingUnitClick = false;
     render();
   } else if(pendingResults.length>0){
+    teamGateOpen = false;
     awaitingThrow = false;
     promptResolveSelection();
   } else {
+    teamGateOpen = false;
     endTurn();
   }
 }
 
+function passGate(){
+  if(!teamMode || !canActRole(3) || !teamGateOpen || !isMyTurn()) return;
+  teamGateOpen = false;
+  awaitingThrow = true;
+  render();
+}
+
 function promptResolveSelection(){
   if(pendingResults.length===1){
-    pickPendingResult(0);
+    resolvePendingResultInternal(0);
     return;
   }
   awaitingResolveChoice = true;
@@ -761,6 +919,11 @@ function promptResolveSelection(){
 
 function pickPendingResult(idx){
   if(!isMyTurn()) return;
+  if(teamMode && !canActRole(2)) return;
+  resolvePendingResultInternal(idx);
+}
+
+function resolvePendingResultInternal(idx){
   awaitingResolveChoice = false;
   const chosen = pendingResults.splice(idx,1)[0];
   pendingMove = {value:chosen.value, backward:chosen.backward, _extra:false};
@@ -791,6 +954,7 @@ function promptUnitSelection(){
 
 function onWaitingClick(playerIdx){
   if(!awaitingUnitClick || playerIdx!==current || !isMyTurn()) return;
+  if(teamMode && !canActRole(2)) return;
   const unit = currentUnits.find(u=>u.type==='new');
   if(unit){ awaitingUnitClick=false; const mv=pendingMove; performMove(unit.pieces, mv); }
 }
@@ -800,6 +964,7 @@ function onPieceClick(pieceId){
   const piece = findPieceById(pieceId);
   if(!piece) return;
   if(awaitingUnitClick){
+    if(teamMode && !canActRole(2)) return;
     if(piece.owner!==current || piece.state!=='onboard') return;
     const nid = nodeIdForPiece(piece);
     const unit = currentUnits.find(u=>u.type==='stack' && u.pieces[0].owner===piece.owner && nodeIdForPiece(u.pieces[0])===nid);
@@ -807,6 +972,7 @@ function onPieceClick(pieceId){
     return;
   }
   if(selection){
+    if(teamMode && !canActRole(3)) return;
     const nid = nodeIdForPiece(piece);
     const group = piece.state==='onboard' ? allPieces().filter(p=>p.state==='onboard' && p.owner===piece.owner && nodeIdForPiece(p)===nid) : [piece];
     handlePowerClick(piece, group);
@@ -927,6 +1093,7 @@ function askDirectionChoice(choices){
 }
 function chooseDirection(i){
   if(!isMyTurn() || !routeChoices) return;
+  if(teamMode && !canActRole(2)) return;
   const picked = routeChoices[i];
   showRouteModal=false; routeChoices=null;
   const r=_routeResolve; _routeResolve=null;
@@ -955,13 +1122,19 @@ function peekBackward(pos, n){
 
 // ---------- mal powers ----------
 function startMalPower(key){
-  if(!awaitingThrow || !isMyTurn()) return;
+  if(!isMyTurn()) return;
+  if(teamMode){
+    if(!teamGateOpen || !canActRole(3)) return;
+  } else if(!awaitingThrow){
+    return;
+  }
   const player = players[current];
   if(player.powerMal.used || player.powerMal.key!==key) return;
   if(key==='eop'){
     const hasWaiting = player.pieces.some(p=>p.state==='waiting');
     if(!hasWaiting){ alert('업을 수 있는 대기 말이 없습니다.'); return; }
   }
+  if(teamMode) teamGateOpen=false;
   if(key==='table'){ useTablePower(); return; }
   awaitingThrow=false;
   selection = {power:key, stage:1, data:{}};
@@ -985,7 +1158,11 @@ function useTablePower(){
 
 function cancelSelection(){
   if(!isMyTurn()) return;
-  selection=null; awaitingThrow=true; render();
+  if(teamMode && !canActRole(3)) return;
+  selection=null;
+  if(teamMode){ teamGateOpen=true; awaitingThrow=false; }
+  else { awaitingThrow=true; }
+  render();
 }
 
 function handlePowerClick(piece, group){
@@ -1038,6 +1215,7 @@ function handlePowerClick(piece, group){
 
 function chooseFrontOffset(n){
   if(!isMyTurn()) return;
+  if(teamMode && !canActRole(3)) return;
   const pos = peekForward(selection.refPos, n);
   selection.targetGroup.forEach(p=>{ p.track=pos.track; p.idx=pos.idx; });
   useMalPower(); log('👉 제 앞에 놔주세요! 상대 말을 '+n+'칸 앞으로 소환했습니다.');
@@ -1045,6 +1223,7 @@ function chooseFrontOffset(n){
 }
 function chooseBackhugPiece(pieceId){
   if(!isMyTurn()) return;
+  if(teamMode && !canActRole(3)) return;
   const piece = findPieceById(pieceId);
   const pos = peekBackward(selection.targetPos, 1);
   piece.state='onboard'; piece.track=pos.track; piece.idx=pos.idx;
@@ -1054,6 +1233,7 @@ function chooseBackhugPiece(pieceId){
 
 function onNodeClick(idx){
   if(!selection || !isMyTurn()) return;
+  if(teamMode && !canActRole(3)) return;
   if(selection.power==='gate' && selection.stage===1){
     if(idx===0 || isOccupiedMain(idx) || hasBombOrGateAt('o'+idx)){ alert('말이 있거나 이미 장치가 설치된 칸에는 놓을 수 없습니다.'); return; }
     gates.push({node:'o'+idx});
@@ -1172,34 +1352,79 @@ function renderPregame(){
       + '<p>⏳ 상대방을 기다리는 중...</p></div></div>';
     return;
   }
+  if(matchPhase==='teamSelect'){ renderTeamSelect(el); return; }
   if(matchPhase==='rps'){ renderRpsModal(el); return; }
   if(matchPhase==='draw'){ renderDrawModal(el); return; }
   el.innerHTML='';
 }
 
+function renderTeamSelect(el){
+  if(mySeat===null){
+    const cA = teamFullCount(0), cB = teamFullCount(1);
+    el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>🏆 팀전 - 팀 선택</h2>'
+      + '<p>방 코드: <b style="font-size:20px;letter-spacing:2px;">'+roomCode+'</b></p>'
+      + '<p>어느 팀에 들어갈까요?</p>'
+      + '<button class="subBtn" onclick="chooseTeam(0)" '+(cA>=4?'disabled':'')+'>🔴 A팀 ('+cA+'/4)</button>'
+      + '<button class="subBtn" onclick="chooseTeam(1)" '+(cB>=4?'disabled':'')+'>🔵 B팀 ('+cB+'/4)</button>'
+      + '</div></div>';
+    return;
+  }
+  if(myRole===null){
+    const roles = teamRoles[mySeat]||{};
+    const roleLabels = {1:'🎲 윷 던지는 사람',2:'♟️ 말 옮기는 사람',3:'✨ 초능력 쓰는 사람',4:'😀 감정표현/이름변경/가위바위보'};
+    let html = '<div class="modalOverlay"><div class="modalBox"><h2>'+(mySeat===0?'🔴 A팀':'🔵 B팀')+' - 역할 선택</h2>';
+    [1,2,3,4].forEach(r=>{
+      const taken = !!roles[r];
+      html += '<button class="subBtn" style="display:block;width:100%;" onclick="chooseRole('+r+')" '+(taken?'disabled':'')+'>'+roleLabels[r]+(taken?' (선택됨)':'')+'</button>';
+    });
+    html += '<div style="margin-top:10px;"><button class="subBtn" onclick="mySeat=null; render();">◀️ 팀 다시 선택</button></div>';
+    html += '</div></div>';
+    el.innerHTML = html;
+    return;
+  }
+  const filledA = teamFullCount(0), filledB = teamFullCount(1);
+  el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>✅ 역할 선택 완료</h2>'
+    + '<p>나는 '+(mySeat===0?'A팀':'B팀')+' - '+roleName(myRole)+'입니다.</p>'
+    + '<p>A팀 '+filledA+'/4 · B팀 '+filledB+'/4</p>'
+    + '<p>⏳ 모든 역할이 정해지면 자동으로 시작됩니다...</p></div></div>';
+}
+
 function renderRpsModal(el){
+  const isSpec = mySeat==='spectator';
   if(rpsCountdown){
     el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h1 style="font-size:90px;margin:0;">'+rpsCountdown+'</h1></div></div>';
     return;
   }
   if(rpsRevealData){
-    const myChoice = mySeat===0?rpsRevealData.c0:rpsRevealData.c1;
-    const oppChoice = mySeat===0?rpsRevealData.c1:rpsRevealData.c0;
+    const label0 = teamMode ? 'A팀' : '플레이어1';
+    const label1 = teamMode ? 'B팀' : '플레이어2';
     if(rpsRevealData.tie){
       el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>✊✌️✋ 가위바위보</h2>'
-        + '<p style="font-size:44px;">'+rpsEmoji(myChoice)+' vs '+rpsEmoji(oppChoice)+'</p>'
+        + '<p style="font-size:44px;">'+rpsEmoji(rpsRevealData.c0)+' vs '+rpsEmoji(rpsRevealData.c1)+'</p>'
         + '<h3>비겼습니다! 다시 선택하세요...</h3></div></div>';
     } else {
-      const iWon = rpsRevealData.winner===mySeat;
+      const winnerLabel = rpsRevealData.winner===0 ? label0 : label1;
+      const iWon = !isSpec && rpsRevealData.winner===mySeat;
       el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>결과 발표!</h2>'
-        + '<p style="font-size:50px;">'+rpsEmoji(myChoice)+' vs '+rpsEmoji(oppChoice)+'</p>'
-        + '<h2 style="color:#ffd166;">'+(iWon?'내가 승리! 선공입니다 🎉':'상대방 승리! 상대가 선공입니다')+'</h2></div></div>';
+        + '<p style="font-size:50px;">'+rpsEmoji(rpsRevealData.c0)+' vs '+rpsEmoji(rpsRevealData.c1)+'</p>'
+        + '<h2 style="color:#ffd166;">'+(isSpec?(winnerLabel+' 승리! 선공입니다 🎉'):(iWon?'내가 승리! 선공입니다 🎉':'상대방 승리! 상대가 선공입니다'))+'</h2></div></div>';
     }
     return;
   }
-  if(myRpsChosen){
+  if(isSpec){
+    el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>✊✌️✋ 가위바위보</h2>'
+      + '<p>⏳ 양 팀이 가위바위보를 선택하고 있습니다...</p></div></div>';
+    return;
+  }
+  const teamChosen = !!(pregameData.rps && pregameData.rps[rpsRound] && pregameData.rps[rpsRound][mySeat]);
+  if(teamChosen || myRpsChosen){
     el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>✊✌️✋ 가위바위보</h2>'
       + '<p>선택 완료! 상대방을 기다리는 중...</p></div></div>';
+    return;
+  }
+  if(teamMode && !canActRole(4)){
+    el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>✊✌️✋ 가위바위보</h2>'
+      + '<p>⏳ 우리 팀의 '+roleName(4)+'이(가) 선택 중입니다...</p></div></div>';
     return;
   }
   el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>✊✌️✋ 가위바위보</h2>'
@@ -1211,18 +1436,27 @@ function renderRpsModal(el){
 }
 
 function renderDrawModal(el){
+  const isSpec = mySeat==='spectator';
+  if(isSpec){
+    el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>🎰 초능력 뽑기</h2>'
+      + '<p>⏳ 양 팀이 초능력을 뽑고 있습니다...</p></div></div>';
+    return;
+  }
   const oppReady = !!(pregameData.draw && pregameData.draw[1-mySeat] && pregameData.draw[1-mySeat].yut);
+  const sharedDraw = (pregameData.draw && pregameData.draw[mySeat]) || myDraw;
   let html = '<div class="modalOverlay"><div class="modalBox">'
     + '<h2>🎰 초능력 뽑기</h2>'
     + '<p>'+(matchStartingSeat===mySeat?'🥇 선공입니다! ':'🥈 후공입니다. ')+'초능력 2개를 뽑으세요.</p>';
   if(drawSpinning){
     html += '<div class="powerCard"><b>🌀 '+drawSpinYut+'</b></div>'
           + '<div class="powerCard"><b>♟️ '+drawSpinMal+'</b></div>';
-  } else if(myDraw.yut){
-    const y = POWERS_YUT.find(p=>p.key===myDraw.yut), m = POWERS_MAL.find(p=>p.key===myDraw.mal);
+  } else if(sharedDraw.yut){
+    const y = POWERS_YUT.find(p=>p.key===sharedDraw.yut), m = POWERS_MAL.find(p=>p.key===sharedDraw.mal);
     html += '<div class="powerCard"><b>🌀 '+y.name+'</b>'+y.desc+'</div>'
           + '<div class="powerCard"><b>♟️ '+m.name+'</b>'+m.desc+'</div>'
           + '<p>'+(oppReady?'상대방도 준비되었습니다! 곧 시작합니다...':'⏳ 상대방이 뽑는 중...')+'</p>';
+  } else if(teamMode && !canActRole(3)){
+    html += '<p>⏳ 우리 팀의 '+roleName(3)+'이(가) 뽑는 중입니다...</p>';
   } else {
     html += '<button class="subBtn" onclick="startDraw()" style="font-size:18px;">🎰 뽑기</button>';
   }
@@ -1237,8 +1471,19 @@ function renderMpStatus(){
     el.textContent = '👀 관전 중 · 방 코드: '+roomCode;
     return;
   }
-  const turnInfo = matchPhase==='playing' ? (isMyTurn()?' · 내 차례!':' · 상대방 차례') : '';
-  el.textContent = '🌐 온라인 대전 중 · 방 코드: '+roomCode+' · 나는 '+(mySeat===0?'플레이어 1(방장)':'플레이어 2')+turnInfo;
+  if(teamMode && mySeat===null){
+    el.textContent = '🏆 팀전 · 방 코드: '+roomCode;
+    return;
+  }
+  const teamLabel = teamMode ? (mySeat===0?'A팀':'B팀') : (mySeat===0?'플레이어 1(방장)':'플레이어 2');
+  const roleLabel = (teamMode && myRole) ? (' - '+roleName(myRole)) : '';
+  let turnInfo = '';
+  if(matchPhase==='playing'){
+    if(isMyActionNow()) turnInfo = ' · 내 차례!';
+    else if(isMyTurn()) turnInfo = ' · 우리팀 차례 (다른 역할 진행 중)';
+    else turnInfo = ' · 상대팀 차례';
+  }
+  el.textContent = (teamMode?'🏆 팀전 중':'🌐 온라인 대전 중')+' · 방 코드: '+roomCode+' · 나는 '+teamLabel+roleLabel+turnInfo;
 }
 
 function renderBanner(){
@@ -1256,7 +1501,7 @@ function renderPanel(idx){
   el.className = 'panel' + (current===idx && !gameOver ? ' activeTurn' : '');
   const waitingCount = p.pieces.filter(x=>x.state==='waiting').length;
   const finishedCount = p.pieces.filter(x=>x.state==='finished').length;
-  const canMoveWaiting = awaitingUnitClick && current===idx && isMyTurn() && currentUnits.some(u=>u.type==='new');
+  const canMoveWaiting = awaitingUnitClick && current===idx && isMyActionNow() && currentUnits.some(u=>u.type==='new');
   let dots='';
   p.pieces.forEach((pc,i)=>{
     const num = i+1;
@@ -1266,8 +1511,12 @@ function renderPanel(idx){
     dots += '<span class="miniPiece" style="'+style+'">'+num+'</span>';
   });
   let html = '<h3 style="color:'+p.color+'">● '+p.name+'</h3>';
-  const isMe = mpEnabled && mySeat===idx;
-  if(isMe){
+  const isMyTeam = mpEnabled && mySeat===idx;
+  const isEmoteController = isMyTeam && (!teamMode || myRole===4);
+  if(isMyTeam && teamMode && myRole){
+    html += '<div class="statLine">나: '+roleName(myRole)+'</div>';
+  }
+  if(isEmoteController){
     html += '<button class="subBtn" onclick="renamePlayer()" style="width:100%;margin:0 0 6px;">✏️ 이름 변경</button>';
   }
   html += '<div class="waitingBox'+(canMoveWaiting?' movable':'')+'" onclick="onWaitingClick('+idx+')">'+dots+'&nbsp; 대기 '+waitingCount+'</div>';
@@ -1280,15 +1529,16 @@ function renderPanel(idx){
   const isSpectator = mpEnabled && mySeat==='spectator';
   const hideYut = mpEnabled && !isSpectator && idx!==mySeat && !yc.used;
   const hideMal = mpEnabled && !isSpectator && idx!==mySeat && !mc.used;
+  const powerActionable = teamMode ? (teamGateOpen && canActRole(3)) : awaitingThrow;
   html += '<div class="powerCard'+(yc.used?' usedCard':'')+(armedYut?' armed':'')+(hideYut?' hiddenPower':'')+'">'
         + '<b>🌀 '+(hideYut?'??? (비공개)':yutFull.name)+'</b>' + (hideYut?'상대방의 능력은 사용 전까지 볼 수 없습니다.':yutFull.desc)
-        + '<button onclick="startYutPower(\''+yc.key+'\')" '+((current!==idx||!awaitingThrow||yc.used||activeYutPower||gaedwaejiActive||!isMyTurn())?'disabled':'')+'>'
+        + '<button onclick="startYutPower(\''+yc.key+'\')" '+((current!==idx||!powerActionable||yc.used||activeYutPower||gaedwaejiActive||!isMyTurn())?'disabled':'')+'>'
         + (yc.used?'사용함':(armedYut?'선택됨 - 던지기 클릭':'사용하기'))+'</button></div>';
   html += '<div class="powerCard'+(mc.used?' usedCard':'')+(hideMal?' hiddenPower':'')+'">'
         + '<b>♟️ '+(hideMal?'??? (비공개)':malFull.name)+'</b>' + (hideMal?'상대방의 능력은 사용 전까지 볼 수 없습니다.':malFull.desc)
-        + '<button onclick="startMalPower(\''+mc.key+'\')" '+((current!==idx||!awaitingThrow||mc.used||selection||!isMyTurn())?'disabled':'')+'>'
+        + '<button onclick="startMalPower(\''+mc.key+'\')" '+((current!==idx||!powerActionable||mc.used||selection||!isMyTurn())?'disabled':'')+'>'
         + (mc.used?'사용함':'사용하기')+'</button></div>';
-  if(isMe){
+  if(isEmoteController){
     html += '<div class="emoteRow">' + EMOTES.map(e=>'<button class="emoteBtn" onclick="sendEmote(\''+e+'\')">'+e+'</button>').join('') + '</div>';
   }
   el.innerHTML = html;
@@ -1306,7 +1556,7 @@ function renderBoard(){
   svg += '</svg>';
 
   let nodesHtml = '';
-  const placingMode = selection && isMyTurn() && (selection.power==='gate' || selection.power==='bomb') && selection.stage===1;
+  const placingMode = selection && isMyActionNow() && (selection.power==='gate' || selection.power==='bomb') && selection.stage===1;
   for(let i=0;i<20;i++){
     const n = NODES['o'+i];
     const isCorner = CORNER_IDS.includes('o'+i);
@@ -1344,11 +1594,11 @@ function renderBoard(){
     const owner = players[g.owner];
     const first = g.pieces[0];
     let cls = 'piece';
-    if(awaitingUnitClick && g.owner===current && isMyTurn()){
+    if(awaitingUnitClick && g.owner===current && isMyActionNow()){
       const isUnit = currentUnits.some(u=>u.type==='stack' && u.pieces[0].owner===g.owner && nodeIdForPiece(u.pieces[0])===g.nid);
       if(isUnit) cls += ' movable';
     }
-    if(selection && isMyTurn()){
+    if(selection && isMyActionNow()){
       const needMine = (selection.power==='eop') || (selection.power==='swap' && selection.stage===1) || (selection.power==='front' && selection.stage===1);
       const needTheirs = (selection.power==='gwi') || (selection.power==='swap' && selection.stage===2) || (selection.power==='front' && selection.stage===2) || (selection.power==='backhug' && selection.stage===1);
       if(needMine && g.owner===current) cls += ' targetable';
@@ -1371,18 +1621,27 @@ function renderControls(){
   if(!gameOver && diceRolling){
     notice = '윷을 던지는 중...';
     html += '<div class="diceAnim"><div class="stick"></div><div class="stick"></div><div class="stick"></div><div class="stick"></div></div>';
-  } else if(!gameOver && !isMyTurn()){
-    if(awaitingThrow) notice = '⏳ 상대방이 윷을 던질 차례입니다...';
-    else if(awaitingResolveChoice) notice = '⏳ 상대방이 어떤 결과를 사용할지 고르고 있습니다...';
-    else if(awaitingUnitClick) notice = '⏳ 상대방이 이동할 말을 선택하고 있습니다...';
-    else if(gaedwaejiActive) notice = '⏳ 상대방이 개와 돼지의 시간 결과를 고르고 있습니다...';
-    else if(selection) notice = '⏳ 상대방이 능력을 사용하고 있습니다...';
-    else notice = '⏳ 상대방의 차례입니다...';
+  } else if(!gameOver && !isMyActionNow()){
+    if(!isMyTurn()){
+      if(awaitingThrow) notice = '⏳ 상대팀이 윷을 던질 차례입니다...';
+      else if(teamGateOpen) notice = '⏳ 상대팀이 초능력 사용 여부를 결정하고 있습니다...';
+      else if(awaitingResolveChoice) notice = '⏳ 상대팀이 어떤 결과를 사용할지 고르고 있습니다...';
+      else if(awaitingUnitClick) notice = '⏳ 상대팀이 이동할 말을 선택하고 있습니다...';
+      else if(gaedwaejiActive) notice = '⏳ 상대팀이 개와 돼지의 시간 결과를 고르고 있습니다...';
+      else if(selection) notice = '⏳ 상대팀이 능력을 사용하고 있습니다...';
+      else notice = '⏳ 상대팀의 차례입니다...';
+    } else {
+      const needed = currentRoleNeeded();
+      notice = '⏳ 우리 팀의 '+roleName(needed)+'이(가) 진행 중입니다...';
+    }
   } else if(!gameOver){
-    if(pendingResults.length>0 && (awaitingThrow || gaedwaejiActive)){
+    if(pendingResults.length>0 && (awaitingThrow || gaedwaejiActive || teamGateOpen)){
       html += '<div class="pendingList">보유 중인 이동값: '+pendingResults.map(r=>(r.backward?'뒤로 ':'')+r.value+'칸').join(', ')+' (모두 던진 뒤 사용)</div>';
     }
-    if(awaitingThrow){
+    if(teamGateOpen){
+      notice = '초능력을 사용하려면 왼쪽/오른쪽 패널의 능력 버튼을 누르세요. 그냥 던지려면 아래 버튼을 누르세요.';
+      html += '<button class="mainBtn" onclick="passGate()">➡️ 그냥 던지기 진행</button>';
+    } else if(awaitingThrow){
       html += '<button class="mainBtn" onclick="throwYut()">🎲 윷 던지기'+(activeYutPower?' ('+POWERS_YUT.find(x=>x.key===activeYutPower).name+' 적용)':'')+'</button>';
     } else if(awaitingResolveChoice){
       notice = '어떤 결과를 먼저 사용할까요?';
@@ -1443,7 +1702,8 @@ function renderModal(){
       body = '<p>방 코드: <b style="font-size:22px;letter-spacing:2px;">'+roomCode+'</b></p>'
            + '<p>나는 '+(mySeat===0?'플레이어 1(방장)':'플레이어 2')+'입니다.<br>이 코드를 상대방에게 알려주세요.</p>';
     } else {
-      body = '<button class="subBtn" onclick="mpCreateRoom()">➕ 방 만들기</button>'
+      body = '<button class="subBtn" onclick="mpCreateRoom()">➕ 방 만들기 (1:1)</button>'
+           + '<button class="subBtn" onclick="mpCreateTeamRoom()">🏆 방 만들기 (팀전 4:4)</button>'
            + '<div style="margin:12px 0;color:#888;">또는</div>'
            + '<input id="joinCodeInput" maxlength="6" placeholder="코드 입력"><br>'
            + '<button class="subBtn" onclick="mpJoinRoom(document.getElementById(\'joinCodeInput\').value)" style="margin-top:8px;">🚪 참가하기</button>';
@@ -1481,7 +1741,7 @@ function renderModal(){
     return;
   }
   if(showRouteModal){
-    if(isMyTurn() && routeChoices){
+    if(isMyActionNow() && routeChoices){
       let html = '<div class="modalOverlay"><div class="modalBox"><h2>갈림길!</h2><p>방향을 선택하세요</p>';
       routeChoices.forEach((c,i)=>{
         html += '<button class="arrowBtn" onclick="chooseDirection('+i+')">'+c.arrow+'<br><span style="font-size:12px;">'+c.label.replace(/^\S+\s/,'')+'</span></button>';
@@ -1489,8 +1749,9 @@ function renderModal(){
       html += '</div></div>';
       el.innerHTML = html;
     } else {
+      const msg = isMyTurn() ? '우리 팀의 '+roleName(2)+'이(가) 갈림길에서 방향을 고르고 있습니다...' : '상대방이 갈림길에서 방향을 고르고 있습니다...';
       el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>갈림길!</h2>'
-        + '<p>상대방이 갈림길에서 방향을 고르고 있습니다...</p></div></div>';
+        + '<p>'+msg+'</p></div></div>';
     }
     return;
   }
