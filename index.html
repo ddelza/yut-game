@@ -94,6 +94,19 @@
   .modalBox { background:#1c2030; border:2px solid #444; border-radius:14px; padding:22px; text-align:center; max-width:340px; }
   .modalBox h2 { margin-top:0; }
   .modalBox button { margin:8px; padding:10px 18px; border-radius:8px; border:none; font-weight:bold; cursor:pointer; }
+  .scoreBox { background:#0a0a0a; border:3px solid #ffcc00; max-width:380px; }
+  .scoreTally { font-family:'Courier New',monospace; text-align:left; margin-top:14px; padding:0 6px; }
+  .scoreLine { font-size:16px; color:#ddd; margin:12px 0; letter-spacing:0.5px; }
+  .scoreLine span { font-size:26px; font-weight:900; margin-left:6px; text-shadow:0 0 8px currentColor; animation: digitPop 0.15s ease; display:inline-block; }
+  .scoreFormula { font-size:26px; font-weight:900; color:#ffcc00; text-align:center; margin-top:18px; letter-spacing:2px; font-family:'Courier New',monospace; }
+  .scoreFormula .op { color:#fff; margin:0 10px; }
+  .scoreTotal { color:#ff3b3b; display:inline-block; animation: digitPop 0.15s ease; }
+  .scoreTotal.final { animation: scorePulse 0.6s ease infinite alternate; font-size:36px; }
+  @keyframes digitPop { 0% { transform:scale(1.6); } 100% { transform:scale(1); } }
+  @keyframes scorePulse {
+    0% { transform:scale(1); text-shadow:0 0 10px #ff3b3b; }
+    100% { transform:scale(1.18); text-shadow:0 0 26px #ff3b3b, 0 0 44px #ffcc00; }
+  }
   .rpsBtn { font-size:15px; padding:14px 18px !important; }
   .arrowBtn { font-size:26px; padding:12px 16px !important; background:#118ab2; color:#fff; line-height:1.4; }
   .arrowBtn:hover { background:#0d90a0; }
@@ -189,7 +202,7 @@ const POWERS_MAL = [
 let players, current, bombs, gates, pendingMove, awaitingThrow, awaitingUnitClick,
     currentUnits, activeYutPower, gaedwaejiActive, selection, showRouteModal, routeChoices,
     _routeResolve, gameOver, winnerIdx, logLines, diceRolling, animatingIds,
-    pendingResults, owedThrows, awaitingResolveChoice;
+    pendingResults, owedThrows, awaitingResolveChoice, scoreTally;
 
 const STEP_DELAY = 260;
 const DICE_ROLL_DURATION = 2000;
@@ -474,7 +487,7 @@ function startMatch(hostDraw, guestDraw){
   pendingMove=null; awaitingThrow=false; awaitingUnitClick=false; currentUnits=[];
   activeYutPower=null; gaedwaejiActive=false; selection=null;
   showRouteModal=false; routeChoices=null; _routeResolve=null;
-  gameOver=false; winnerIdx=null;
+  gameOver=false; winnerIdx=null; scoreTally=null;
   diceRolling=false; animatingIds=new Set();
   pendingResults=[]; owedThrows=0; awaitingResolveChoice=false;
   logLines = ['🎮 온라인 대전이 시작됩니다!'];
@@ -527,7 +540,7 @@ function serializeState(){
       targetPos: selection.targetPos||null
     } : null,
     showRouteModal, routeChoices, gameOver, winnerIdx,
-    logLines, diceRolling, animatingIds:[...animatingIds], bigResultText
+    logLines, diceRolling, animatingIds:[...animatingIds], bigResultText, scoreTally
   };
 }
 
@@ -555,6 +568,7 @@ function applyRemoteState(s){
   logLines = s.logLines||[]; diceRolling = !!s.diceRolling;
   animatingIds = new Set(s.animatingIds||[]);
   bigResultText = s.bigResultText||null;
+  scoreTally = s.scoreTally||null;
 }
 
 function pickRandom(arr){ return {...arr[Math.floor(Math.random()*arr.length)], used:false}; }
@@ -575,7 +589,7 @@ function initGame(){
   pendingMove=null; awaitingThrow=false; awaitingUnitClick=false; currentUnits=[];
   activeYutPower=null; gaedwaejiActive=false; selection=null;
   showRouteModal=false; routeChoices=null; _routeResolve=null;
-  gameOver=false; winnerIdx=null;
+  gameOver=false; winnerIdx=null; scoreTally=null;
   diceRolling=false; animatingIds=new Set();
   pendingResults=[]; owedThrows=0; awaitingResolveChoice=false;
   logLines = ['🎮 게임을 시작합니다! 각자 초능력 카드를 1장씩 받았습니다.'];
@@ -1052,8 +1066,40 @@ function onNodeClick(idx){
 // ---------- turn flow ----------
 function checkWinCondition(ownerIdx){
   if(players[ownerIdx].pieces.every(p=>p.state==='finished')){
-    gameOver=true; winnerIdx=ownerIdx; render();
+    gameOver=true; winnerIdx=ownerIdx;
+    const loserIdx = 1-ownerIdx;
+    const targetRemaining = players[loserIdx].pieces.filter(p=>p.state!=='finished').length;
+    const targetUnused = (players[ownerIdx].powerYut.used?0:1) + (players[ownerIdx].powerMal.used?0:1);
+    scoreTally = {phase:'remaining', remaining:0, unused:0, total:0, targetRemaining, targetUnused};
+    render();
+    runScoreTally();
   }
+}
+
+async function runScoreTally(){
+  await tallyCountUp('remaining', scoreTally.targetRemaining);
+  await sleep(450);
+  scoreTally.phase = 'unused';
+  render();
+  await tallyCountUp('unused', scoreTally.targetUnused);
+  await sleep(450);
+  scoreTally.phase = 'total';
+  render();
+  await tallyCountUp('total', scoreTally.targetRemaining + scoreTally.targetUnused);
+  scoreTally.phase = 'done';
+  render();
+}
+
+async function tallyCountUp(field, target){
+  scoreTally[field] = 0;
+  render();
+  await sleep(250);
+  for(let i=1;i<=target;i++){
+    scoreTally[field] = i;
+    render();
+    await sleep(150);
+  }
+  await sleep(400);
 }
 function endTurn(){
   current = 1-current;
@@ -1404,8 +1450,29 @@ function renderModal(){
   }
   if(gameOver){
     const w = players[winnerIdx];
-    el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2 style="color:'+w.color+'">🎉 '+w.name+' 승리!</h2>'
-      + '<button onclick="handleNewGameClick()" style="background:#06d6a0;color:#fff;">다시하기</button></div></div>';
+    const loserIdx = 1-winnerIdx;
+    const loserColor = players[loserIdx].color;
+    let html = '<div class="modalOverlay"><div class="modalBox scoreBox">'
+      + '<h2 style="color:'+w.color+'">🎉 '+w.name+' 승리!</h2>';
+    if(scoreTally){
+      html += '<div class="scoreTally">';
+      html += '<div class="scoreLine">진 팀 남은 말 개수 : <span style="color:'+loserColor+'">'+scoreTally.remaining+'</span></div>';
+      if(scoreTally.phase!=='remaining'){
+        html += '<div class="scoreLine">사용하지 않은 초능력 개수 : <span style="color:#38bdf8">'+scoreTally.unused+'</span></div>';
+      }
+      if(scoreTally.phase==='total' || scoreTally.phase==='done'){
+        html += '<div class="scoreFormula">'+scoreTally.remaining+' <span class="op">+</span> '+scoreTally.unused
+              + ' <span class="op">=</span> <span class="scoreTotal'+(scoreTally.phase==='done'?' final':'')+'">'+scoreTally.total+'</span></div>';
+      }
+      html += '</div>';
+      if(scoreTally.phase==='done'){
+        html += '<button onclick="handleNewGameClick()" style="background:#06d6a0;color:#fff;">다시하기</button>';
+      }
+    } else {
+      html += '<button onclick="handleNewGameClick()" style="background:#06d6a0;color:#fff;">다시하기</button>';
+    }
+    html += '</div></div>';
+    el.innerHTML = html;
     return;
   }
   if(showRouteModal){
