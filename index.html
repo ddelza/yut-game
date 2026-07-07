@@ -1221,14 +1221,28 @@ function chooseFrontOffset(n){
   useMalPower(); log('👉 제 앞에 놔주세요! 상대 말을 '+n+'칸 앞으로 소환했습니다.');
   selection=null; owedThrows--; render(); advanceTurnFlow();
 }
+function captureIfPresent(pos, ownerIdx){
+  let captured = false;
+  allPieces().forEach(p=>{
+    if(p.owner!==ownerIdx && p.state==='onboard' && p.track===pos.track && p.idx===pos.idx){
+      p.state='waiting'; p.track=null; p.idx=null; captured=true;
+    }
+  });
+  return captured;
+}
+
 function chooseBackhugPiece(pieceId){
   if(!isMyTurn()) return;
   if(teamMode && !canActRole(3)) return;
   const piece = findPieceById(pieceId);
   const pos = peekBackward(selection.targetPos, 1);
   piece.state='onboard'; piece.track=pos.track; piece.idx=pos.idx;
-  useMalPower(); log('🤗 백허그! 상대 말 바로 뒤에 착지했습니다.');
-  selection=null; owedThrows--; render(); advanceTurnFlow();
+  const captured = captureIfPresent(pos, piece.owner);
+  useMalPower();
+  log('🤗 백허그! 상대 말 바로 뒤에 착지했습니다.' + (captured ? ' 그 자리에 있던 상대 말도 잡았습니다! 한 번 더 던집니다.' : ''));
+  selection=null; owedThrows--;
+  if(captured) owedThrows++;
+  render(); advanceTurnFlow();
 }
 
 function onNodeClick(idx){
