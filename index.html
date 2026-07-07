@@ -1010,7 +1010,15 @@ async function performMove(unitPieces, moveInfo){
     await sleep(STEP_DELAY);
   }
   async function retreatPosOnce(){
-    if(pos.track==='main'){ pos.idx--; if(pos.idx<0){ pos.track='WAITING'; return; } }
+    if(pos.track==='main'){
+      pos.idx--;
+      if(pos.idx<0){
+        if(cameFromWaiting){ pos.track='WAITING'; return; }
+        // already made board progress before this retreat: overshooting the finish/entry point
+        // means continuing further back around the board, not leaving it
+        pos.idx=19;
+      }
+    }
     else if(pos.track==='diag5'){ pos.idx--; if(pos.idx<0){ pos.track='main'; pos.idx=5; } }
     else if(pos.track==='diag10'){ pos.idx--; if(pos.idx<0){ pos.track='main'; pos.idx=10; } }
     unitPieces.forEach(p=>{ p.track=pos.track; p.idx=pos.idx; });
