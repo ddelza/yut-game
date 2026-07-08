@@ -746,7 +746,11 @@ function nodeIdFromPos(pos){
 }
 function nodeIdForPiece(p){ if(p.state!=='onboard') return null; return nodeIdFromPos(p); }
 
-function isOccupiedMain(idx){ return allPieces().some(p=>p.state==='onboard' && p.track==='main' && p.idx===idx); }
+function isOccupiedMain(idx){
+  // corners 5/10 are also reachable as diag5/diag10 idx 0, so compare by physical node
+  const nid = 'o'+idx;
+  return allPieces().some(p=>p.state==='onboard' && nodeIdForPiece(p)===nid);
+}
 function hasBombOrGateAt(node){ return bombs.some(b=>b.node===node) || gates.some(g=>g.node===node); }
 
 // ---------- branch (shortcut) choices: only offered when a piece STARTS its move exactly at a fork ----------
@@ -937,7 +941,9 @@ function promptUnitSelection(){
   const waiting = p.pieces.filter(pc=>pc.state==='waiting');
   const groups = {};
   p.pieces.filter(pc=>pc.state==='onboard').forEach(pc=>{
-    const k = pc.track+':'+pc.idx;
+    // group by physical node, not raw track/idx: corner/center cells are reachable
+    // via more than one (track,idx) pair and must still count as the same stack
+    const k = nodeIdForPiece(pc);
     (groups[k] = groups[k] || []).push(pc);
   });
   const units = [];
