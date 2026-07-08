@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>초능력 윷놀이 리그전 대진표</title>
+<style>
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:16px; font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;
+    background: radial-gradient(circle at top, #232838 0%, #12141c 70%);
+    color:#eee; min-height:100vh;
+  }
+  a.backLink { display:inline-block; color:#8fd3ff; text-decoration:none; font-size:13px; margin-bottom:8px; }
+  a.backLink:hover { text-decoration:underline; }
+  h1 { text-align:center; margin:4px 0 2px; font-size:24px; letter-spacing:1px;
+       background:linear-gradient(90deg,#ffd166,#06d6a0,#118ab2); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .subtitle { text-align:center; color:#9aa0b4; font-size:13px; margin-bottom:18px; }
+  #pentagonWrap { display:flex; justify-content:center; }
+  #pentagonWrap svg { width:min(560px,92vw); height:auto; }
+  .vLabel { fill:#fff; font-size:20px; font-weight:bold; text-anchor:middle; dominant-baseline:middle; }
+  .roundLabel { fill:#c7ccdd; font-size:11px; text-anchor:middle; dominant-baseline:middle; pointer-events:none; }
+  .matchLine { cursor:pointer; }
+  .matchLine:hover { stroke-width:5; }
+  .legend { display:flex; justify-content:center; gap:18px; flex-wrap:wrap; margin:16px 0 4px; font-size:12px; color:#c7ccdd; }
+  .legend span.dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:middle; }
+  #overlay { position:fixed; inset:0; background:rgba(0,0,0,0.65); display:none; align-items:center; justify-content:center; z-index:50; padding:16px; }
+  #overlay.show { display:flex; }
+  #modal { background:#1c2030; border:2px solid #3a3f55; border-radius:14px; padding:18px; width:100%; max-width:760px; max-height:90vh; overflow-y:auto; }
+  #modal h2 { margin:0 0 4px; font-size:19px; text-align:center; }
+  #modal .matchSub { text-align:center; color:#ffd166; font-size:13px; margin-bottom:14px; }
+  #modalClose { float:right; background:#333; color:#eee; border:1px solid #555; border-radius:6px; padding:4px 10px; cursor:pointer; font-size:13px; }
+  #modalClose:hover { background:#444; }
+  .classCols { display:flex; gap:14px; flex-wrap:wrap; }
+  .classCol { flex:1 1 320px; background:#171a26; border:1px solid #2c3146; border-radius:10px; padding:12px; }
+  .classCol h3 { margin:0 0 10px; text-align:center; font-size:16px; color:#8fd3ff; }
+  .roleBlock { margin-bottom:12px; background:#20243590; border:1px solid #2c3146; border-radius:8px; padding:8px 10px; }
+  .roleBlock .roleHead { display:flex; justify-content:space-between; font-size:13px; font-weight:bold; margin-bottom:6px; }
+  .roleBlock .roleHead .cnt { color:#9aa0b4; font-weight:normal; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; }
+  .chip { background:#2c3146; border:1px solid #454b63; border-radius:14px; padding:3px 8px 3px 10px; font-size:12px; display:flex; align-items:center; gap:5px; }
+  .chip button { background:none; border:none; color:#ff8a8a; cursor:pointer; font-size:13px; padding:0; line-height:1; }
+  .addRow { display:flex; gap:6px; }
+  .addRow select { flex:1; background:#12141c; color:#eee; border:1px solid #454b63; border-radius:6px; padding:4px; font-size:12px; }
+  .addRow button { background:#118ab2; color:#fff; border:none; border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; }
+  .addRow button:hover { background:#0f7a9d; }
+  .fullNote { color:#9aa0b4; font-size:11px; }
+</style>
+</head>
+<body>
+<a class="backLink" href="index.html">← 초능력 윷놀이로 돌아가기</a>
+<h1>제1회 3학년 초능력 윷놀이 리그전</h1>
+<div class="subtitle">각 선을 클릭해서 그 경기에 우리 반 선수 명단을 등록하세요 (실시간으로 모두에게 공유됩니다)</div>
+
+<div id="pentagonWrap"><svg id="pentagonSvg" viewBox="0 0 520 520"></svg></div>
+
+<div class="legend">
+  <span><span class="dot" style="background:#454b63"></span>미입력</span>
+  <span><span class="dot" style="background:#ffd166"></span>일부 등록</span>
+  <span><span class="dot" style="background:#06d6a0"></span>등록 완료</span>
+</div>
+
+<div id="overlay">
+  <div id="modal">
+    <button id="modalClose" onclick="closeModal()">닫기 ✕</button>
+    <h2 id="modalTitle"></h2>
+    <div class="matchSub" id="modalSub"></div>
+    <div class="classCols" id="modalCols"></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyB_D2Wi944YQL-1rCdgeNU-tD8lpMek_wM",
+  authDomain: "gwangsu-on.firebaseapp.com",
+  databaseURL: "https://gwangsu-on-default-rtdb.firebaseio.com",
+  projectId: "gwangsu-on",
+  storageBucket: "gwangsu-on.firebasestorage.app",
+  messagingSenderId: "684885628658",
+  appId: "1:684885628658:web:d392c4adf67185f02b626b",
+  measurementId: "G-NWR5SBWHNV"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+</script>
+<script>
+// ---------- static data ----------
+const CLASS_STUDENTS = {
+  1: ["강승재","김수민","김태연","박도윤","박예승","박은호","박혜나","백서후","성소언","신채하","안예찬","이상호","이소민","이예원","이윤성","이효서","전진하","정수진","정채아","차수연","최강원","최은호","최지혁","최하윤","박재련"],
+  2: ["강승현","곽누리","김동한","김민성","김선재","김수빈","김우진","박건","박서호","박정빈","배주은","성빛","심다혜","안준서","오시현","유승연","유지호","이문혁","이선주","이세은","이하리","차서정","최서연","허승찬"],
+  3: ["강효민","길라임","김가은","김벼리","김살롬","김상이","김인구","김주한","김효영","박서준","박성준","서하람","서효준","안학유","안휘연","윤나현","이세영","이예진","이윤성","장서윤","전현석","채수빈","최재원","한건희"],
+  4: ["경나현","고은별","김다경","김별","김서우","김시우","김지우","김하윤","박시율","배순우","배태랑","손지수","양성원","엄태양","유태현","이서아","이석호","이시유","이하은","장지효","정다율","정이온","최현빈","함병현","황의범"],
+  5: ["강다현","김도후","김민석","김재혁","김태양","김태연","류하늬","박서이","박준","변아림","성준혁","심가온","심나빈","유태이","이단","이세아","이우선","이지윤","정상빈","정예리나","정희현","차유빈","최서정","한효주","함건우"]
+};
+const ROLES = [
+  {key:'yutjabi', name:'윷잡이'},
+  {key:'brain', name:'브레인'},
+  {key:'power', name:'초능력자'},
+  {key:'mood', name:'분위기메이커'}
+];
+const SCHEDULE = [
+  {date:'7/10(금)', round:1, a:1, b:2},
+  {date:'7/10(금)', round:2, a:3, b:4},
+  {date:'7/10(금)', round:3, a:5, b:1},
+  {date:'7/10(금)', round:4, a:2, b:3},
+  {date:'7/10(금)', round:5, a:4, b:5},
+  {date:'7/15(수)', round:1, a:1, b:3},
+  {date:'7/15(수)', round:2, a:5, b:2},
+  {date:'7/15(수)', round:3, a:4, b:1},
+  {date:'7/15(수)', round:4, a:3, b:5},
+  {date:'7/15(수)', round:5, a:2, b:4}
+];
+function matchKey(a,b){ const x=Math.min(a,b), y=Math.max(a,b); return x+'_'+y; }
+const SCHEDULE_MAP = {};
+SCHEDULE.forEach(s=>{ SCHEDULE_MAP[matchKey(s.a,s.b)] = s; });
+
+// ---------- state ----------
+let rosterData = {};
+let currentMatchKey = null;
+
+const ROSTER_PATH = 'rooms/leagueRoster';
+db.ref(ROSTER_PATH).on('value', snap=>{
+  rosterData = snap.val() || {};
+  renderPentagon();
+  if(currentMatchKey) renderModal();
+});
+
+// ---------- pentagon ----------
+function vertexPos(i){
+  const cx=260, cy=260, R=190;
+  const rad = (-90 + i*72) * Math.PI/180;
+  return {x: cx + R*Math.cos(rad), y: cy + R*Math.sin(rad)};
+}
+function labelPos(i){
+  const cx=260, cy=260, R=232;
+  const rad = (-90 + i*72) * Math.PI/180;
+  return {x: cx + R*Math.cos(rad), y: cy + R*Math.sin(rad)};
+}
+function matchStatus(mk){
+  const rec = rosterData[mk];
+  if(!rec) return 'empty';
+  const [a,b] = mk.split('_');
+  let any=false, full=true;
+  [a,b].forEach(c=>{
+    const cd = rec[c];
+    ROLES.forEach(r=>{
+      const arr = (cd && cd[r.key]) || [];
+      if(arr.length>0) any=true; else full=false;
+    });
+  });
+  if(full) return 'complete';
+  if(any) return 'partial';
+  return 'empty';
+}
+const STATUS_COLOR = {empty:'#454b63', partial:'#ffd166', complete:'#06d6a0'};
+
+function renderPentagon(){
+  const svg = document.getElementById('pentagonSvg');
+  let html = '';
+  // lines
+  for(let i=1;i<=5;i++){
+    for(let j=i+1;j<=5;j++){
+      const p1 = vertexPos(i-1), p2 = vertexPos(j-1);
+      const mk = matchKey(i,j);
+      const status = matchStatus(mk);
+      const color = STATUS_COLOR[status];
+      html += `<line class="matchLine" x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}"
+        stroke="transparent" stroke-width="18" onclick="openModal('${mk}')"><title>3-${i} vs 3-${j}</title></line>`;
+      html += `<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" pointer-events="none"
+        stroke="${color}" stroke-width="3" ${status==='empty'?'stroke-dasharray="6 5"':''}/>`;
+      const mx=(p1.x+p2.x)/2, my=(p1.y+p2.y)/2;
+      const sched = SCHEDULE_MAP[mk];
+      if(sched){
+        html += `<text class="roundLabel" x="${mx}" y="${my}">${sched.date.slice(0,4)} ${sched.round}경기</text>`;
+      }
+    }
+  }
+  // vertices
+  for(let i=0;i<5;i++){
+    const p = vertexPos(i), lp = labelPos(i);
+    html += `<circle cx="${p.x}" cy="${p.y}" r="26" fill="#1c2030" stroke="#8fd3ff" stroke-width="2"/>`;
+    html += `<text class="vLabel" x="${p.x}" y="${p.y}">3-${i+1}</text>`;
+  }
+  svg.innerHTML = html;
+}
+
+// ---------- modal ----------
+function openModal(mk){
+  currentMatchKey = mk;
+  document.getElementById('overlay').classList.add('show');
+  renderModal();
+}
+function closeModal(){
+  currentMatchKey = null;
+  document.getElementById('overlay').classList.remove('show');
+}
+document.getElementById('overlay').addEventListener('click', e=>{
+  if(e.target.id==='overlay') closeModal();
+});
+
+function usedNamesForClass(mk, c){
+  const rec = (rosterData[mk] && rosterData[mk][c]) || {};
+  const used = new Set();
+  ROLES.forEach(r=>{ (rec[r.key]||[]).forEach(n=>used.add(n)); });
+  return used;
+}
+
+function renderModal(){
+  const mk = currentMatchKey;
+  const [a,b] = mk.split('_');
+  const sched = SCHEDULE_MAP[mk];
+  document.getElementById('modalTitle').textContent = `3-${a} vs 3-${b}`;
+  document.getElementById('modalSub').textContent = sched ? `${sched.date} ${sched.round}경기` : '';
+
+  let cols = '';
+  [a,b].forEach(c=>{
+    const used = usedNamesForClass(mk, c);
+    const rec = (rosterData[mk] && rosterData[mk][c]) || {};
+    cols += `<div class="classCol"><h3>3-${c} 라인업</h3>`;
+    ROLES.forEach(r=>{
+      const arr = rec[r.key] || [];
+      cols += `<div class="roleBlock">
+        <div class="roleHead"><span>${r.name}</span><span class="cnt">${arr.length}/7</span></div>
+        <div class="chips">`;
+      arr.forEach(name=>{
+        cols += `<span class="chip">${name}<button onclick="removeStudent('${mk}','${c}','${r.key}','${name.replace(/'/g,"\\'")}')">✕</button></span>`;
+      });
+      cols += `</div>`;
+      if(arr.length < 7){
+        const avail = CLASS_STUDENTS[c].filter(n=>!used.has(n));
+        if(avail.length>0){
+          cols += `<div class="addRow">
+            <select id="sel_${mk}_${c}_${r.key}">
+              ${avail.map(n=>`<option value="${n}">${n}</option>`).join('')}
+            </select>
+            <button onclick="addStudent('${mk}','${c}','${r.key}')">추가</button>
+          </div>`;
+        } else {
+          cols += `<div class="fullNote">추가 가능한 학생이 없습니다 (이미 다른 조에 등록됨)</div>`;
+        }
+      } else {
+        cols += `<div class="fullNote">최대 인원(7명)에 도달했습니다</div>`;
+      }
+      cols += `</div>`;
+    });
+    cols += `</div>`;
+  });
+  document.getElementById('modalCols').innerHTML = cols;
+}
+
+function addStudent(mk, c, roleKey){
+  const sel = document.getElementById(`sel_${mk}_${c}_${roleKey}`);
+  if(!sel || !sel.value) return;
+  const name = sel.value;
+  const used = usedNamesForClass(mk, c);
+  if(used.has(name)){ alert('이미 이 경기의 다른 조에 등록된 학생입니다.'); return; }
+  const ref = db.ref(`${ROSTER_PATH}/${mk}/${c}/${roleKey}`);
+  ref.transaction(cur=>{
+    const arr = cur || [];
+    if(arr.includes(name)) return arr;
+    if(arr.length>=7) return arr;
+    return [...arr, name];
+  });
+}
+function removeStudent(mk, c, roleKey, name){
+  const ref = db.ref(`${ROSTER_PATH}/${mk}/${c}/${roleKey}`);
+  ref.transaction(cur=>{
+    if(!cur) return cur;
+    return cur.filter(n=>n!==name);
+  });
+}
+
+renderPentagon();
+</script>
+</body>
+</html>
