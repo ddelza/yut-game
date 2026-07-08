@@ -1233,9 +1233,14 @@ function chooseFrontOffset(n){
   if(!isMyTurn()) return;
   if(teamMode && !canActRole(3)) return;
   const pos = peekForward(selection.refPos, n);
+  const ownerIdx = selection.targetGroup[0].owner;
   selection.targetGroup.forEach(p=>{ p.track=pos.track; p.idx=pos.idx; });
-  useMalPower(); log('👉 제 앞에 놔주세요! 상대 말을 '+n+'칸 앞으로 소환했습니다.');
-  selection=null; owedThrows--; render(); advanceTurnFlow();
+  const captured = captureIfPresent(pos, ownerIdx);
+  useMalPower();
+  log('👉 제 앞에 놔주세요! 상대 말을 '+n+'칸 앞으로 소환했습니다.' + (captured ? ' 그 자리에 있던 다른 말을 잡았습니다! 한 번 더 던집니다.' : ''));
+  selection=null; owedThrows--;
+  if(captured) owedThrows++;
+  render(); advanceTurnFlow();
 }
 function captureIfPresent(pos, ownerIdx){
   let captured = false;
