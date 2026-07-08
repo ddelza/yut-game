@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>초능력 윷놀이 버그 제보</title>
+<style>
+  * { box-sizing:border-box; }
+  body {
+    margin:0; padding:16px; font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;
+    background: radial-gradient(circle at top, #232838 0%, #12141c 70%);
+    color:#eee; min-height:100vh;
+  }
+  a.backLink { display:inline-block; color:#8fd3ff; text-decoration:none; font-size:13px; margin-bottom:8px; }
+  a.backLink:hover { text-decoration:underline; }
+  h1 { text-align:center; margin:4px 0 2px; font-size:24px; letter-spacing:1px;
+       background:linear-gradient(90deg,#ffd166,#06d6a0,#118ab2); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .subtitle { text-align:center; color:#9aa0b4; font-size:13px; margin-bottom:20px; }
+  #inappBanner { display:none; background:#ffd166; color:#222; padding:10px 14px; border-radius:8px; font-size:13px; max-width:480px; margin:0 auto 16px; text-align:center; }
+  #inappBanner button { display:block; margin:8px auto 0; background:#222; color:#fff; border:none; border-radius:6px; padding:6px 14px; cursor:pointer; font-size:13px; }
+  #formBox { max-width:460px; margin:0 auto; background:#1c2030; border:2px solid #333; border-radius:14px; padding:20px; }
+  .field { margin-bottom:14px; }
+  .field label { display:block; font-size:13px; color:#c7ccdd; margin-bottom:5px; }
+  .field input, .field textarea {
+    width:100%; padding:10px; border-radius:8px; border:1px solid #454b63; background:#12141c; color:#eee; font-size:14px; font-family:inherit;
+  }
+  .field textarea { resize:vertical; min-height:110px; }
+  #submitBtn { width:100%; padding:12px; border:none; border-radius:8px; background:#118ab2; color:#fff; font-size:15px; font-weight:bold; cursor:pointer; }
+  #submitBtn:hover { background:#0f7a9d; }
+  #submitBtn:disabled { background:#444; color:#888; cursor:not-allowed; }
+  #statusMsg { text-align:center; font-size:13px; margin-top:12px; min-height:18px; }
+  #statusMsg.ok { color:#06d6a0; }
+  #statusMsg.err { color:#ff8a8a; }
+</style>
+</head>
+<body>
+<a class="backLink" href="index.html">← 초능력 윷놀이로 돌아가기</a>
+<h1>🐛 버그 제보 게시판</h1>
+<div class="subtitle">게임하다가 만난 버그나 이상한 점을 알려주세요!</div>
+
+<div id="inappBanner">
+  카카오톡 등 인앱 브라우저에서는 제출이 안 될 수 있어요.<br>아래 버튼으로 외부 브라우저에서 열어주세요.
+  <button onclick="openInExternalBrowser()">외부 브라우저로 열기</button>
+</div>
+
+<div id="formBox">
+  <div class="field">
+    <label for="studentId">학번 (예: 3514)</label>
+    <input type="text" id="studentId" inputmode="numeric" maxlength="4" placeholder="3514">
+  </div>
+  <div class="field">
+    <label for="studentName">이름</label>
+    <input type="text" id="studentName" placeholder="홍길동">
+  </div>
+  <div class="field">
+    <label for="bugContent">버그 내용</label>
+    <textarea id="bugContent" placeholder="언제, 어떤 상황에서, 무슨 일이 있었는지 최대한 자세히 적어주세요."></textarea>
+  </div>
+  <button id="submitBtn" onclick="submitReport()">제보하기</button>
+  <div id="statusMsg"></div>
+</div>
+
+<script>
+const APPS_SCRIPT_URL = 'PASTE_DEPLOYED_APPS_SCRIPT_URL_HERE';
+
+function detectInAppBrowser() {
+  const ua = navigator.userAgent || '';
+  return /KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line\//i.test(ua);
+}
+function openInExternalBrowser() {
+  const url = window.location.href;
+  const ua = navigator.userAgent || '';
+  if (/KAKAOTALK/i.test(ua)) {
+    window.location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(url);
+  } else if (/NAVER/i.test(ua)) {
+    window.location.href = 'naversearchapp://inappbrowser?app=naversearchapp&url=' + encodeURIComponent(url);
+  } else {
+    window.location.href = 'intent://' + url.replace(/^https?:\/\//, '') + '#Intent;scheme=https;package=com.android.chrome;end';
+  }
+}
+if (detectInAppBrowser()) document.getElementById('inappBanner').style.display = 'block';
+
+function jsonpOnce(url) {
+  return new Promise((resolve, reject) => {
+    const cbName = '_cb' + Date.now() + Math.floor(Math.random() * 1e6);
+    const script = document.createElement('script');
+    script.src = url + (url.includes('?') ? '&' : '?') + 'callback=' + cbName;
+    const timeoutId = setTimeout(() => { delete window[cbName]; script.remove(); reject(new Error('시간 초과')); }, 10000);
+    window[cbName] = data => { clearTimeout(timeoutId); delete window[cbName]; script.remove(); resolve(data); };
+    script.onerror = () => { clearTimeout(timeoutId); delete window[cbName]; script.remove(); reject(new Error('요청 실패')); };
+    document.head.appendChild(script);
+  });
+}
+function jsonp(url) {
+  return jsonpOnce(url).catch(() => new Promise((resolve, reject) => {
+    setTimeout(() => { jsonpOnce(url).then(resolve).catch(reject); }, 1500);
+  }));
+}
+
+function submitReport(){
+  const studentId = document.getElementById('studentId').value.trim();
+  const studentName = document.getElementById('studentName').value.trim();
+  const content = document.getElementById('bugContent').value.trim();
+  const statusMsg = document.getElementById('statusMsg');
+  const btn = document.getElementById('submitBtn');
+
+  if(!studentId || !studentName || !content){
+    statusMsg.className = 'err';
+    statusMsg.textContent = '학번, 이름, 버그 내용을 모두 입력해주세요.';
+    return;
+  }
+
+  btn.disabled = true;
+  statusMsg.className = '';
+  statusMsg.textContent = '제출 중...';
+
+  let url;
+  try {
+    url = new URL(APPS_SCRIPT_URL);
+    url.searchParams.set('action', 'submit');
+    url.searchParams.set('studentId', studentId);
+    url.searchParams.set('name', studentName);
+    url.searchParams.set('content', content);
+  } catch(err){
+    btn.disabled = false;
+    statusMsg.className = 'err';
+    statusMsg.textContent = '설정 오류: 제보 서버 주소가 올바르지 않습니다.';
+    return;
+  }
+
+  jsonp(url.toString()).then(data => {
+    btn.disabled = false;
+    if(data && data.error){
+      statusMsg.className = 'err';
+      statusMsg.textContent = data.error;
+      return;
+    }
+    statusMsg.className = 'ok';
+    statusMsg.textContent = '제보가 접수되었습니다. 감사합니다!';
+    document.getElementById('bugContent').value = '';
+  }).catch(err => {
+    btn.disabled = false;
+    statusMsg.className = 'err';
+    statusMsg.textContent = '제출 실패: ' + err.message + ' (다시 시도해주세요)';
+  });
+}
+</script>
+</body>
+</html>
