@@ -1078,7 +1078,9 @@ async function performMove(unitPieces, moveInfo){
     } else {
       unitPieces.forEach(p=>{ p.state='onboard'; p.track=pos.track; p.idx=pos.idx; });
       allPieces().forEach(p=>{
-        if(p.owner!==owner && p.state==='onboard' && p.track===pos.track && p.idx===pos.idx){
+        // compare by physical node id, not track+idx: corners/center are reachable via
+        // more than one (track,idx) pair (e.g. main idx5 and diag5 idx0 are both 'o5')
+        if(p.owner!==owner && p.state==='onboard' && nodeIdForPiece(p)===nid){
           p.state='waiting'; p.track=null; p.idx=null; capturedSomething=true;
         }
       });
@@ -1231,8 +1233,9 @@ function chooseFrontOffset(n){
 }
 function captureIfPresent(pos, ownerIdx){
   let captured = false;
+  const nid = nodeIdFromPos(pos);
   allPieces().forEach(p=>{
-    if(p.owner!==ownerIdx && p.state==='onboard' && p.track===pos.track && p.idx===pos.idx){
+    if(p.owner!==ownerIdx && p.state==='onboard' && nodeIdForPiece(p)===nid){
       p.state='waiting'; p.track=null; p.idx=null; captured=true;
     }
   });
