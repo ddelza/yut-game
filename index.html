@@ -1044,8 +1044,10 @@ async function performMove(unitPieces, moveInfo){
     }
     else if(pos.track==='diag5'){ pos.idx++; if(pos.idx>=6){ pos.track='main'; pos.idx=15; } }
     else if(pos.track==='diag10'){
-      if(pos.idx===5){ pos.track='FINISH'; return; }
       pos.idx++;
+      // diag10's far end rejoins the shared closing point (main idx0), not an instant finish:
+      // resting there needs one more step to actually finish, same as the outer ring's own wraparound
+      if(pos.idx>=6){ pos.track='main'; pos.idx=0; restedAtClose=true; }
     }
     unitPieces.forEach(p=>{ p.track=pos.track; p.idx=pos.idx; });
     render();
