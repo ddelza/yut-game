@@ -216,6 +216,13 @@ function sleep(ms){ return new Promise(resolve=>setTimeout(resolve, ms)); }
 let mpEnabled=false, mySeat=null, myWriterId=null, roomCode=null, roomRef=null,
     applyingRemote=false, mpSeq=0, lobbyOpen=false;
 
+// ---------- emote spam guard (local-only, not synced) ----------
+let emoteSendTimestamps = [];
+let emoteMutedUntil = 0;
+const EMOTE_SPAM_WINDOW = 3000;
+const EMOTE_SPAM_LIMIT = 10;
+const EMOTE_MUTE_DURATION = 10000;
+
 // ---------- team mode state ----------
 let teamMode=false, myRole=null, isRoomCreator=false, teamRoles={0:{},1:{}}, teamGateOpen=false;
 function isTeamMode(){ return !!teamMode; }
@@ -285,13 +292,42 @@ function renamePlayer(){
   const trimmed = newName.trim().slice(0,10);
   if(!trimmed) return;
   players[mySeat].name = trimmed;
+  if(mpEnabled && roomRef){
+    // write only the name leaf (not a full serializeState() overwrite) so a rename
+    // can't stomp another client's in-flight dice-throw/animation state mid-turn
+    mpSeq++;
+    const update = { writerId: myWriterId, seq: mpSeq };
+    update['state/players/'+mySeat+'/name'] = trimmed;
+    roomRef.update(update);
+  }
+  applyingRemote = true; // reuse this flag to suppress render()'s usual full-state push
   render();
+  applyingRemote = false;
+}
+
+let emoteUnmuteTimerSet = false;
+function scheduleEmoteUnmuteRerender(){
+  if(emoteUnmuteTimerSet) return;
+  emoteUnmuteTimerSet = true;
+  const wait = Math.max(0, emoteMutedUntil - Date.now()) + 50;
+  setTimeout(()=>{ emoteUnmuteTimerSet = false; render(); }, wait);
 }
 
 function sendEmote(emoji){
   if(!mpEnabled || mySeat==='spectator' || mySeat===null || !roomRef) return;
   if(teamMode && !canActRole(4)) return;
-  roomRef.child('emotes').push({seat:mySeat, emoji, ts:Date.now()});
+  const now = Date.now();
+  if(now < emoteMutedUntil) return;
+  emoteSendTimestamps = emoteSendTimestamps.filter(t => now - t < EMOTE_SPAM_WINDOW);
+  if(emoteSendTimestamps.length >= EMOTE_SPAM_LIMIT){
+    emoteMutedUntil = now + EMOTE_MUTE_DURATION;
+    emoteSendTimestamps = [];
+    log('🙊 감정표현을 너무 빨리 눌러서 10초 동안 잠시 막힙니다.');
+    render();
+    return;
+  }
+  emoteSendTimestamps.push(now);
+  roomRef.child('emotes').push({seat:mySeat, emoji, ts:now});
 }
 
 function subscribeEmotes(){
@@ -1575,7 +1611,12 @@ function renderPanel(idx){
         + '<button onclick="startMalPower(\''+mc.key+'\')" '+((current!==idx||!powerActionable||mc.used||selection||!isMyTurn())?'disabled':'')+'>'
         + (mc.used?'사용함':'사용하기')+'</button></div>';
   if(isEmoteController){
-    html += '<div class="emoteRow">' + EMOTES.map(e=>'<button class="emoteBtn" onclick="sendEmote(\''+e+'\')">'+e+'</button>').join('') + '</div>';
+    const muted = Date.now() < emoteMutedUntil;
+    html += '<div class="emoteRow">' + EMOTES.map(e=>'<button class="emoteBtn" '+(muted?'disabled':'')+' onclick="sendEmote(\''+e+'\')">'+e+'</button>').join('') + '</div>';
+    if(muted){
+      html += '<div style="text-align:center;font-size:11px;color:#ffd166;margin-top:2px;">잠시 후 다시 사용 가능합니다</div>';
+      scheduleEmoteUnmuteRerender();
+    }
   }
   el.innerHTML = html;
 }
