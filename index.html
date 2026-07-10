@@ -120,7 +120,7 @@
 </head>
 <body>
 <h1>⚡ 초능력 윷놀이 ⚡</h1>
-<div id="topBar"><button onclick="handleNewGameClick()">🔄 새 게임</button><button onclick="openLobby()">🌐 온라인 대전</button><button onclick="window.open('rule.html','_blank')">📖 룰북 보기</button><button onclick="window.open('report.html','_blank')">🐛 버그 제보</button></div>
+<div id="topBar"><button onclick="handleNewGameClick()">🔄 새 게임</button><button onclick="openLobby()">🌐 온라인 대전</button><button onclick="refreshKeepingState()">♻️ 상태유지 새로고침</button><button onclick="window.open('rule.html','_blank')">📖 룰북 보기</button><button onclick="window.open('report.html','_blank')">🐛 버그 제보</button></div>
 <div id="mpStatus"></div>
 <div id="turnBanner"></div>
 <div id="mainArea">
@@ -215,6 +215,84 @@ function sleep(ms){ return new Promise(resolve=>setTimeout(resolve, ms)); }
 // ---------- multiplayer state ----------
 let mpEnabled=false, mySeat=null, myWriterId=null, roomCode=null, roomRef=null,
     applyingRemote=false, mpSeq=0, lobbyOpen=false;
+
+// ---------- session persistence: survive a manual page refresh mid-match ----------
+const SESSION_KEY = 'yutPowerSession_v1';
+
+function saveSession(){
+  if(!mpEnabled || !roomCode) return;
+  try{
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ roomCode, mySeat, myRole, teamMode, isRoomCreator }));
+  }catch(e){}
+}
+function clearSession(){
+  try{ sessionStorage.removeItem(SESSION_KEY); }catch(e){}
+}
+
+function refreshKeepingState(){
+  if(mpEnabled && roomCode){
+    if(!confirm('화면을 새로고침합니다. 온라인 대전 상태는 그대로 유지됩니다. 계속할까요?')) return;
+    saveSession();
+    window.location.reload();
+  } else {
+    if(!confirm('새로고침하면 지금 진행 중인 게임은 초기화됩니다. 계속할까요?')) return;
+    window.location.reload();
+  }
+}
+
+function tryRestoreSession(){
+  let saved = null;
+  try{ saved = JSON.parse(sessionStorage.getItem(SESSION_KEY)); }catch(e){}
+  if(!saved || !saved.roomCode){ initGame(); return; }
+
+  roomCode = saved.roomCode;
+  mySeat = saved.mySeat;
+  myRole = saved.myRole;
+  teamMode = !!saved.teamMode;
+  isRoomCreator = !!saved.isRoomCreator;
+  myWriterId = randomId();
+  mpEnabled = true;
+  roomRef = db.ref('rooms/'+roomCode);
+  resetPregameVarsLocal();
+  players = null; gameOver = false;
+
+  roomRef.once('value').then(snap=>{
+    const data = snap.val();
+    if(!data || !data.meta){
+      clearSession();
+      mpEnabled=false; roomRef=null; roomCode=null; mySeat=null; myRole=null; teamMode=false;
+      initGame();
+      alert('방을 찾을 수 없어 새 게임을 시작합니다.');
+      return;
+    }
+    const meta = data.meta;
+    if(teamMode) teamRoles = meta.roles || {0:{},1:{}};
+    if(data.state){
+      matchPhase = 'playing';
+      applyingRemote = true;
+      applyRemoteState(data.state);
+      applyingRemote = false;
+      logLines.unshift('🔄 새로고침 후 게임 상태를 복원했습니다.');
+    } else {
+      matchPhase = teamMode ? 'teamSelect' : (mySeat===null ? 'waiting' : 'rps');
+    }
+    if(mySeat==='spectator'){
+      const mySpecRef = roomRef.child('meta/spectators/'+myWriterId);
+      mySpecRef.set(true);
+      mySpecRef.onDisconnect().remove();
+    }
+    subscribeMeta();
+    subscribePregame();
+    subscribeRoom();
+    subscribeEmotes();
+    render();
+  }).catch(()=>{
+    clearSession();
+    mpEnabled=false; roomRef=null; roomCode=null;
+    initGame();
+    alert('재접속에 실패했습니다. 새 게임을 시작합니다.');
+  });
+}
 
 // ---------- emote spam guard (local-only, not synced) ----------
 let emoteSendTimestamps = [];
@@ -1385,6 +1463,7 @@ function startTurn(idx){
 
 // ---------- render ----------
 function render(){
+  saveSession();
   renderMpStatus();
   if(mpEnabled && matchPhase && matchPhase!=='playing'){
     renderPregame();
@@ -1837,7 +1916,7 @@ function renderModal(){
   el.innerHTML = '';
 }
 
-window.onload = function(){ initGame(); };
+window.onload = function(){ tryRestoreSession(); };
 </script>
 </body>
 </html>
