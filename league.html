@@ -58,6 +58,13 @@
   .resultForm input[type=number] { width:70px; background:#12141c; color:#eee; border:1px solid #454b63; border-radius:6px; padding:6px; font-size:13px; }
   .resultForm button.saveBtn { background:#06d6a0; color:#0a1a14; border:none; border-radius:8px; padding:6px 14px; font-weight:bold; cursor:pointer; }
   .resultTag { fill:#ffd166; font-size:11px; font-weight:bold; text-anchor:middle; dominant-baseline:middle; pointer-events:none; }
+  #standingsWrap { max-width:480px; margin:22px auto 0; background:#1c2030; border:2px solid #333; border-radius:14px; padding:14px 18px; }
+  #standingsWrap h2 { text-align:center; font-size:16px; margin:0 0 10px; color:#ffd166; }
+  #standingsTable { width:100%; border-collapse:collapse; font-size:13px; }
+  #standingsTable th, #standingsTable td { padding:7px 6px; text-align:center; border-bottom:1px solid #2c3146; }
+  #standingsTable th { color:#8fd3ff; font-weight:bold; }
+  #standingsTable td.classCell { font-weight:bold; text-align:left; padding-left:10px; }
+  #standingsTable tr:first-child td { color:#ffd166; }
 </style>
 </head>
 <body>
@@ -73,6 +80,11 @@
   <span><span class="dot" style="background:#454b63"></span>미입력</span>
   <span><span class="dot" style="background:#ffd166"></span>일부 등록</span>
   <span><span class="dot" style="background:#06d6a0"></span>등록 완료</span>
+</div>
+
+<div id="standingsWrap">
+  <h2>🏆 순위표</h2>
+  <table id="standingsTable"></table>
 </div>
 
 <div id="overlay">
@@ -150,8 +162,37 @@ db.ref(ROSTER_PATH).on('value', snap=>{
 db.ref(RESULTS_PATH).on('value', snap=>{
   resultsData = snap.val() || {};
   renderPentagon();
+  renderStandings();
   if(currentMatchKey) renderModal();
 });
+
+// ---------- standings ----------
+function computeStandings(){
+  const stats = {};
+  for(let c=1;c<=5;c++) stats[c] = {points:0, wins:0, losses:0};
+  Object.keys(resultsData).forEach(mk=>{
+    const result = resultsData[mk];
+    if(!result || !result.winner) return;
+    const [a,b] = mk.split('_');
+    const winner = String(result.winner);
+    const loser = (winner===a) ? b : a;
+    if(!stats[winner] || !stats[loser]) return;
+    stats[winner].points += Number(result.score)||0;
+    stats[winner].wins += 1;
+    stats[loser].losses += 1;
+  });
+  return stats;
+}
+function renderStandings(){
+  const stats = computeStandings();
+  const rows = [1,2,3,4,5].map(c=>({c, ...stats[c]}));
+  rows.sort((r1,r2)=> r2.points - r1.points || r2.wins - r1.wins);
+  let html = '<tr><th>순위</th><th>반</th><th>승점</th><th>전적</th></tr>';
+  rows.forEach((r,i)=>{
+    html += `<tr><td>${i+1}</td><td class="classCell">3-${r.c}</td><td>${r.points}</td><td>${r.wins}승 ${r.losses}패</td></tr>`;
+  });
+  document.getElementById('standingsTable').innerHTML = html;
+}
 
 function enterAdminMode(){
   if(isAdmin){ return; }
@@ -362,6 +403,7 @@ if(isAdmin){
   document.getElementById('adminBtn').classList.add('on');
 }
 renderPentagon();
+renderStandings();
 </script>
 </body>
 </html>
