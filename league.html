@@ -45,12 +45,27 @@
   .addRow button { background:#118ab2; color:#fff; border:none; border-radius:6px; padding:4px 10px; font-size:12px; cursor:pointer; }
   .addRow button:hover { background:#0f7a9d; }
   .fullNote { color:#9aa0b4; font-size:11px; }
+  #adminBar { text-align:center; margin-bottom:10px; }
+  #adminBar button { background:#333; color:#eee; border:1px solid #555; border-radius:6px; padding:6px 14px; cursor:pointer; font-size:12px; }
+  #adminBar button:hover { background:#444; }
+  #adminBar button.on { background:#06d6a0; color:#0a1a14; border-color:#06d6a0; font-weight:bold; }
+  .resultBox { background:#171a26; border:1px solid #2c3146; border-radius:10px; padding:12px; margin-bottom:14px; text-align:center; }
+  .resultBox .doneMsg { color:#06d6a0; font-weight:bold; font-size:15px; }
+  .resultBox .noneMsg { color:#9aa0b4; font-size:13px; }
+  .resultForm { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; align-items:center; margin-top:8px; }
+  .resultForm button.winnerBtn { background:#2c3146; border:1px solid #454b63; color:#eee; border-radius:8px; padding:6px 12px; cursor:pointer; font-size:13px; }
+  .resultForm button.winnerBtn.picked { background:#118ab2; border-color:#118ab2; font-weight:bold; }
+  .resultForm input[type=number] { width:70px; background:#12141c; color:#eee; border:1px solid #454b63; border-radius:6px; padding:6px; font-size:13px; }
+  .resultForm button.saveBtn { background:#06d6a0; color:#0a1a14; border:none; border-radius:8px; padding:6px 14px; font-weight:bold; cursor:pointer; }
+  .resultTag { fill:#ffd166; font-size:11px; font-weight:bold; text-anchor:middle; dominant-baseline:middle; pointer-events:none; }
 </style>
 </head>
 <body>
 <a class="backLink" href="index.html">← 초능력 윷놀이로 돌아가기</a>
 <h1>제1회 3학년 초능력 윷놀이 리그전</h1>
 <div class="subtitle">각 선을 클릭해서 그 경기에 우리 반 선수 명단을 등록하세요 (실시간으로 모두에게 공유됩니다)</div>
+
+<div id="adminBar"><button id="adminBtn" onclick="enterAdminMode()">🔑 관리자 모드</button></div>
 
 <div id="pentagonWrap"><svg id="pentagonSvg" viewBox="0 0 520 520"></svg></div>
 
@@ -65,6 +80,7 @@
     <button id="modalClose" onclick="closeModal()">닫기 ✕</button>
     <h2 id="modalTitle"></h2>
     <div class="matchSub" id="modalSub"></div>
+    <div class="resultBox" id="modalResult"></div>
     <div class="classCols" id="modalCols"></div>
   </div>
 </div>
@@ -118,14 +134,37 @@ SCHEDULE.forEach(s=>{ SCHEDULE_MAP[matchKey(s.a,s.b)] = s; });
 
 // ---------- state ----------
 let rosterData = {};
+let resultsData = {};
 let currentMatchKey = null;
 
 const ROSTER_PATH = 'rooms/leagueRoster';
+const RESULTS_PATH = 'rooms/leagueResults';
+const ADMIN_PASSWORD = 'byung0703!';
+let isAdmin = (sessionStorage.getItem('leagueAdmin') === '1');
+
 db.ref(ROSTER_PATH).on('value', snap=>{
   rosterData = snap.val() || {};
   renderPentagon();
   if(currentMatchKey) renderModal();
 });
+db.ref(RESULTS_PATH).on('value', snap=>{
+  resultsData = snap.val() || {};
+  renderPentagon();
+  if(currentMatchKey) renderModal();
+});
+
+function enterAdminMode(){
+  if(isAdmin){ return; }
+  const pw = prompt('관리자 비밀번호를 입력하세요:');
+  if(pw === null) return;
+  if(pw !== ADMIN_PASSWORD){ alert('비밀번호가 올바르지 않습니다.'); return; }
+  isAdmin = true;
+  sessionStorage.setItem('leagueAdmin', '1');
+  document.getElementById('adminBtn').textContent = '🔓 관리자 모드 (ON)';
+  document.getElementById('adminBtn').classList.add('on');
+  alert('관리자 모드가 활성화되었습니다. 이제 경기 결과(승패/승점)를 입력할 수 있습니다.');
+  if(currentMatchKey) renderModal();
+}
 
 // ---------- pentagon ----------
 function vertexPos(i){
@@ -173,7 +212,11 @@ function renderPentagon(){
       const mx=(p1.x+p2.x)/2, my=(p1.y+p2.y)/2;
       const sched = SCHEDULE_MAP[mk];
       if(sched){
-        html += `<text class="roundLabel" x="${mx}" y="${my}">${sched.date.slice(0,4)} ${sched.round}경기</text>`;
+        html += `<text class="roundLabel" x="${mx}" y="${my-9}">${sched.date.slice(0,4)} ${sched.round}경기</text>`;
+      }
+      const result = resultsData[mk];
+      if(result && result.winner){
+        html += `<text class="resultTag" x="${mx}" y="${my+9}">🏆3-${result.winner} (${result.score}점)</text>`;
       }
     }
   }
@@ -207,12 +250,54 @@ function usedNamesForClass(mk, c){
   return used;
 }
 
+let resultForm = {};
+function pickWinner(mk, c){
+  resultForm[mk] = resultForm[mk] || {};
+  resultForm[mk].winner = c;
+  renderModal();
+}
+function saveResult(mk){
+  const draft = resultForm[mk] || {};
+  const winner = draft.winner || (resultsData[mk] && resultsData[mk].winner);
+  const scoreInput = document.getElementById(`scoreInput_${mk}`);
+  const score = scoreInput ? parseInt(scoreInput.value, 10) : NaN;
+  if(!winner){ alert('승리한 반을 먼저 선택하세요.'); return; }
+  if(isNaN(score) || score < 0){ alert('승점을 올바르게 입력하세요.'); return; }
+  db.ref(`${RESULTS_PATH}/${mk}`).set({ winner: String(winner), score });
+  delete resultForm[mk];
+}
+
+function renderResultBox(mk){
+  const [a,b] = mk.split('_');
+  const el = document.getElementById('modalResult');
+  const result = resultsData[mk];
+  let html = '';
+  if(result && result.winner){
+    html += `<div class="doneMsg">🏆 3-${result.winner} 승 · 승점 ${result.score}</div>`;
+  } else {
+    html += `<div class="noneMsg">아직 경기 결과가 입력되지 않았습니다.</div>`;
+  }
+  if(isAdmin){
+    const draft = resultForm[mk] || {};
+    const currentWinner = draft.winner || (result && result.winner) || null;
+    const currentScore = (draft.score!=null) ? draft.score : (result ? result.score : '');
+    html += `<div class="resultForm">
+      <button class="winnerBtn ${String(currentWinner)===a?'picked':''}" onclick="pickWinner('${mk}','${a}')">3-${a} 승</button>
+      <button class="winnerBtn ${String(currentWinner)===b?'picked':''}" onclick="pickWinner('${mk}','${b}')">3-${b} 승</button>
+      <input type="number" id="scoreInput_${mk}" min="0" placeholder="승점" value="${currentScore}">
+      <button class="saveBtn" onclick="saveResult('${mk}')">저장</button>
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+
 function renderModal(){
   const mk = currentMatchKey;
   const [a,b] = mk.split('_');
   const sched = SCHEDULE_MAP[mk];
   document.getElementById('modalTitle').textContent = `3-${a} vs 3-${b}`;
   document.getElementById('modalSub').textContent = sched ? `${sched.date} ${sched.round}경기` : '';
+  renderResultBox(mk);
 
   let cols = '';
   [a,b].forEach(c=>{
@@ -272,6 +357,10 @@ function removeStudent(mk, c, roleKey, name){
   });
 }
 
+if(isAdmin){
+  document.getElementById('adminBtn').textContent = '🔓 관리자 모드 (ON)';
+  document.getElementById('adminBtn').classList.add('on');
+}
 renderPentagon();
 </script>
 </body>
