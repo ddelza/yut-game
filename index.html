@@ -362,27 +362,6 @@ function rpsEmoji(c){ return c==='가위'?'✌️':(c==='바위'?'✊':'✋'); }
 
 const EMOTES = ['😄','😢','👍','😠','😲','🙏'];
 
-function renamePlayer(){
-  if(!mpEnabled || mySeat==='spectator' || mySeat===null || !players) return;
-  if(teamMode && !canActRole(4)) return;
-  const newName = prompt('새 이름을 입력하세요 (최대 10자):', players[mySeat].name);
-  if(newName===null) return;
-  const trimmed = newName.trim().slice(0,10);
-  if(!trimmed) return;
-  players[mySeat].name = trimmed;
-  if(mpEnabled && roomRef){
-    // write only the name leaf (not a full serializeState() overwrite) so a rename
-    // can't stomp another client's in-flight dice-throw/animation state mid-turn
-    mpSeq++;
-    const update = { writerId: myWriterId, seq: mpSeq };
-    update['state/players/'+mySeat+'/name'] = trimmed;
-    roomRef.update(update);
-  }
-  applyingRemote = true; // reuse this flag to suppress render()'s usual full-state push
-  render();
-  applyingRemote = false;
-}
-
 let emoteUnmuteTimerSet = false;
 function scheduleEmoteUnmuteRerender(){
   if(emoteUnmuteTimerSet) return;
@@ -1668,9 +1647,6 @@ function renderPanel(idx){
   const isEmoteController = isMyTeam && (!teamMode || myRole===4);
   if(isMyTeam && teamMode && myRole){
     html += '<div class="statLine">나: '+roleName(myRole)+'</div>';
-  }
-  if(isEmoteController){
-    html += '<button class="subBtn" onclick="renamePlayer()" style="width:100%;margin:0 0 6px;">✏️ 이름 변경</button>';
   }
   html += '<div class="waitingBox'+(canMoveWaiting?' movable':'')+'" onclick="onWaitingClick('+idx+')">'+dots+'&nbsp; 대기 '+waitingCount+'</div>';
   html += '<div class="statLine">완주 '+finishedCount+' / 4</div>';
