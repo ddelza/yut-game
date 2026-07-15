@@ -319,6 +319,27 @@ function sleep(ms){ return new Promise(resolve=>setTimeout(resolve, ms)); }
 let mpEnabled=false, mySeat=null, myWriterId=null, roomCode=null, roomRef=null,
     applyingRemote=false, mpSeq=0, lobbyOpen=false;
 
+// ---------- guard against an incoming remote update clobbering a local in-flight
+// animation (dice throw / piece movement). Without this, a remote update from
+// another client arriving mid-`await` overwrites the globals a still-running
+// local async function depends on, which is what caused the "무한로딩" freeze —
+// this is far more likely in 4:4 team mode since there are up to 8 concurrent
+// writers instead of 2. ----------
+let localAnimationDepth = 0;
+let pendingRemoteState = null;
+function beginLocalAnimation(){ localAnimationDepth++; }
+function endLocalAnimation(){
+  localAnimationDepth = Math.max(0, localAnimationDepth-1);
+  if(localAnimationDepth===0 && pendingRemoteState){
+    const state = pendingRemoteState;
+    pendingRemoteState = null;
+    applyingRemote = true;
+    applyRemoteState(state);
+    render();
+    applyingRemote = false;
+  }
+}
+
 // ---------- session persistence: survive a manual page refresh mid-match ----------
 const SESSION_KEY = 'yutPowerSession_v1';
 
@@ -836,6 +857,13 @@ function subscribeRoom(){
     if(!data || !data.state) return;
     if(data.writerId === myWriterId) return;
     if(matchPhase!=='playing') return;
+    if(localAnimationDepth>0){
+      // a local throw/move animation is still running; applying this now would
+      // overwrite the globals it's mid-way through using. Buffer it and apply
+      // once the local animation finishes (see endLocalAnimation).
+      pendingRemoteState = data.state;
+      return;
+    }
     applyingRemote = true;
     applyRemoteState(data.state);
     render();
@@ -1014,67 +1042,77 @@ function startYutPower(key){
 async function chooseGaedwaeji(value){
   if(!isMyTurn()) return;
   if(teamMode && !canActRole(3)) return;
-  gaedwaejiActive=false;
-  owedThrows--;
-  const label = value===1?'도':'개';
-  log('🎲 개와 돼지의 시간: '+label+'('+value+'칸)을 선택했습니다.');
-  bigResultText = '🎲 '+label+' ('+value+'칸)';
-  render();
-  await sleep(1300);
-  bigResultText = null;
-  pendingResults.push({value, backward:false});
-  render();
-  advanceTurnFlow();
+  beginLocalAnimation();
+  try {
+    gaedwaejiActive=false;
+    owedThrows--;
+    const label = value===1?'도':'개';
+    log('🎲 개와 돼지의 시간: '+label+'('+value+'칸)을 선택했습니다.');
+    bigResultText = '🎲 '+label+' ('+value+'칸)';
+    render();
+    await sleep(1300);
+    bigResultText = null;
+    pendingResults.push({value, backward:false});
+    render();
+    advanceTurnFlow();
+  } finally {
+    endLocalAnimation();
+  }
 }
 
 async function throwYut(){
   if(!awaitingThrow || !isMyTurn() || owedThrows<=0) return;
   if(teamMode && !canActRole(1)) return;
-  awaitingThrow=false;
-  owedThrows--;
-  diceRolling=true;
-  render();
-  await sleep(DICE_ROLL_DURATION);
-  diceRolling=false;
-  const player = players[current];
-  let result;
-  if(activeYutPower==='100horse'){ result={label:'걸',value:3,extra:false,backward:false,isNak:false}; usePower(); }
-  else if(activeYutPower==='reverse'){ result={label:'뒷도',value:1,extra:false,backward:true,isNak:false}; usePower(); }
-  else if(activeYutPower==='moordo'){ result = Math.random()<0.5 ? {label:'모',value:5,extra:true,backward:false,isNak:false} : {label:'도',value:1,extra:false,backward:false,isNak:false}; usePower(); }
-  else if(activeYutPower==='midas'){ result = Math.random()<0.5 ? {label:'윷',value:4,extra:true,backward:false,isNak:false} : {label:'모',value:5,extra:true,backward:false,isNak:false}; usePower(); }
-  else if(activeYutPower==='doubledouble'){ result = rollNatural(); usePower(); if(!result.isNak){ result = Object.assign({}, result, {label:result.label+' x2', doubled:true}); } }
-  else if(activeYutPower==='backstep'){ result = rollNatural(); usePower(); if(!result.isNak){ result = Object.assign({}, result, {backward:true}); } }
-  else if(activeYutPower==='takeout'){
-    result = rollNatural(); usePower();
-    if(result.isNak){ log('🎲 낙! 테이크아웃 능력이 낭비되었습니다.'); }
-    else {
-      player.bankedQueue.push({value:result.value, backward:!!result.backward, extra:!!result.extra});
-      log('🎲 '+result.label+'! 테이크아웃으로 다음 턴에 사용하도록 저장했습니다.');
+  beginLocalAnimation();
+  try {
+    awaitingThrow=false;
+    owedThrows--;
+    diceRolling=true;
+    render();
+    await sleep(DICE_ROLL_DURATION);
+    diceRolling=false;
+    const player = players[current];
+    let result;
+    if(activeYutPower==='100horse'){ result={label:'걸',value:3,extra:false,backward:false,isNak:false}; usePower(); }
+    else if(activeYutPower==='reverse'){ result={label:'뒷도',value:1,extra:false,backward:true,isNak:false}; usePower(); }
+    else if(activeYutPower==='moordo'){ result = Math.random()<0.5 ? {label:'모',value:5,extra:true,backward:false,isNak:false} : {label:'도',value:1,extra:false,backward:false,isNak:false}; usePower(); }
+    else if(activeYutPower==='midas'){ result = Math.random()<0.5 ? {label:'윷',value:4,extra:true,backward:false,isNak:false} : {label:'모',value:5,extra:true,backward:false,isNak:false}; usePower(); }
+    else if(activeYutPower==='doubledouble'){ result = rollNatural(); usePower(); if(!result.isNak){ result = Object.assign({}, result, {label:result.label+' x2', doubled:true}); } }
+    else if(activeYutPower==='backstep'){ result = rollNatural(); usePower(); if(!result.isNak){ result = Object.assign({}, result, {backward:true}); } }
+    else if(activeYutPower==='takeout'){
+      result = rollNatural(); usePower();
+      if(result.isNak){ log('🎲 낙! 테이크아웃 능력이 낭비되었습니다.'); }
+      else {
+        player.bankedQueue.push({value:result.value, backward:!!result.backward, extra:!!result.extra});
+        log('🎲 '+result.label+'! 테이크아웃으로 다음 턴에 사용하도록 저장했습니다.');
+      }
+      activeYutPower=null; render(); advanceTurnFlow(); return;
     }
-    activeYutPower=null; render(); advanceTurnFlow(); return;
-  }
-  else { result = rollNatural(); }
-  activeYutPower = null;
-  if(result.isNak){
-    log('🎲 낙! 이번 기회를 날렸습니다.');
-    bigResultText = '💥 낙!';
+    else { result = rollNatural(); }
+    activeYutPower = null;
+    if(result.isNak){
+      log('🎲 낙! 이번 기회를 날렸습니다.');
+      bigResultText = '💥 낙!';
+      render();
+      await sleep(1300);
+      bigResultText = null;
+      render();
+      advanceTurnFlow();
+      return;
+    }
+    log('🎲 '+result.label+'! ('+(result.backward?'뒤로 ':'')+result.value+'칸'+(result.doubled?' x2':'')+(result.extra?', 한번 더!':'')+')');
+    bigResultText = '🎲 '+result.label+(result.backward?' (뒤로 '+result.value+'칸)':' ('+result.value+'칸)')+(result.doubled?' - 2번 사용 가능':'');
     render();
     await sleep(1300);
     bigResultText = null;
+    pendingResults.push({value:result.value, backward:!!result.backward});
+    if(result.doubled) pendingResults.push({value:result.value, backward:!!result.backward});
+    if(result.extra) owedThrows++;
     render();
     advanceTurnFlow();
-    return;
+  } finally {
+    endLocalAnimation();
   }
-  log('🎲 '+result.label+'! ('+(result.backward?'뒤로 ':'')+result.value+'칸'+(result.doubled?' x2':'')+(result.extra?', 한번 더!':'')+')');
-  bigResultText = '🎲 '+result.label+(result.backward?' (뒤로 '+result.value+'칸)':' ('+result.value+'칸)')+(result.doubled?' - 2번 사용 가능':'');
-  render();
-  await sleep(1300);
-  bigResultText = null;
-  pendingResults.push({value:result.value, backward:!!result.backward});
-  if(result.doubled) pendingResults.push({value:result.value, backward:!!result.backward});
-  if(result.extra) owedThrows++;
-  render();
-  advanceTurnFlow();
 }
 
 // ---------- turn flow: accumulate throws first, then resolve ----------
@@ -1182,6 +1220,14 @@ function onPieceClick(pieceId){
 }
 
 async function performMove(unitPieces, moveInfo){
+  beginLocalAnimation();
+  try {
+    await performMoveInner(unitPieces, moveInfo);
+  } finally {
+    endLocalAnimation();
+  }
+}
+async function performMoveInner(unitPieces, moveInfo){
   unitPieces.forEach(p=>animatingIds.add(p.id));
   const cameFromWaiting = unitPieces[0].state==='waiting';
   let pos;
