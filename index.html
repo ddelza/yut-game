@@ -120,7 +120,7 @@
 </head>
 <body>
 <h1>⚡ 초능력 윷놀이 ⚡</h1>
-<div id="topBar"><button onclick="handleNewGameClick()">🔄 새 게임</button><button onclick="openLobby()">🌐 온라인 대전</button><button onclick="refreshKeepingState()">♻️ 상태유지 새로고침</button><button onclick="window.open('rule.html','_blank')">📖 룰북 보기</button><button onclick="window.open('report.html','_blank')">🐛 버그 제보</button></div>
+<div id="topBar"><button onclick="handleNewGameClick()">🔄 새 게임</button><button onclick="openLobby()">🌐 온라인 대전</button><button onclick="refreshKeepingState()">♻️ 상태유지 새로고침</button><button onclick="enterGameAdminMode()">🛠️ 관리자 모드</button><button onclick="window.open('rule.html','_blank')">📖 룰북 보기</button><button onclick="window.open('report.html','_blank')">🐛 버그 제보</button></div>
 <div id="mpStatus"></div>
 <div id="turnBanner"></div>
 <div id="mainArea">
@@ -201,6 +201,109 @@ const POWERS_MAL = [
  {key:'gate', name:'결승점이 코앞이네', desc:'빈 칸에 결승 게이트를 설치합니다. 밟으면 누구든 즉시 완주!'},
  {key:'bomb', name:'폭발물 주의', desc:'빈 칸에 폭탄을 설치합니다. 밟거나 지나가면 처음으로 돌아갑니다.'}
 ];
+
+// ---------- admin mode: manually reconstruct a game state ----------
+const GAME_ADMIN_PASSWORD = '123456789!';
+let isGameAdmin = false;
+let adminEditorOpen = false;
+
+function enterGameAdminMode(){
+  if(mpEnabled){
+    const isHost = teamMode ? isRoomCreator : (mySeat===0);
+    if(!isHost){ alert('방장만 관리자 모드를 사용할 수 있습니다.'); return; }
+  }
+  if(!players){ alert('게임이 시작된 후에 사용할 수 있습니다.'); return; }
+  const pw = prompt('관리자 비밀번호를 입력하세요:');
+  if(pw===null) return;
+  if(pw !== GAME_ADMIN_PASSWORD){ alert('비밀번호가 올바르지 않습니다.'); return; }
+  isGameAdmin = true;
+  adminEditorOpen = true;
+  render();
+}
+function closeAdminEditor(){
+  adminEditorOpen = false;
+  render();
+}
+function adminPositionOptionsHtml(selectedValue){
+  const opts = [['waiting','대기 (출발 전)'], ['finished','완주']];
+  for(let i=0;i<20;i++){
+    opts.push(['main:'+i, (i===0?'0번 칸 (결승선/시작점)':i+'번 칸')]);
+  }
+  for(let i=1;i<=5;i++){
+    opts.push(['diag5:'+i, '5→중앙 지름길 '+i+'칸째'+(i===3?' (중앙)':'')]);
+  }
+  for(let i=1;i<=5;i++){
+    opts.push(['diag10:'+i, '10→중앙 지름길 '+i+'칸째'+(i===3?' (중앙)':'')]);
+  }
+  return opts.map(([v,l])=>'<option value="'+v+'"'+(v===selectedValue?' selected':'')+'>'+l+'</option>').join('');
+}
+function adminPosToValue(piece){
+  if(piece.state==='waiting') return 'waiting';
+  if(piece.state==='finished') return 'finished';
+  return piece.track+':'+piece.idx;
+}
+function adminParsePos(value){
+  if(value==='waiting') return {state:'waiting', track:null, idx:null};
+  if(value==='finished') return {state:'finished', track:null, idx:null};
+  const sep = value.lastIndexOf(':');
+  return {state:'onboard', track:value.slice(0,sep), idx:parseInt(value.slice(sep+1),10)};
+}
+function renderAdminEditorHtml(){
+  let html = '<div class="modalOverlay"><div class="modalBox" style="max-width:640px;text-align:left;max-height:85vh;overflow-y:auto;">';
+  html += '<h2 style="text-align:center;">🛠️ 관리자 모드 - 게임 상태 재구성</h2>';
+  for(let pi=0; pi<2; pi++){
+    const player = players[pi];
+    html += '<div style="border:1px solid #3a3f55;border-radius:10px;padding:10px;margin-bottom:12px;">';
+    html += '<h3 style="color:'+player.color+';margin:0 0 8px;">● '+player.name+'</h3>';
+    html += '<div style="margin-bottom:6px;">윷의 힘: <select id="admYutSel'+pi+'">'
+      + POWERS_YUT.map(p=>'<option value="'+p.key+'"'+(p.key===player.powerYut.key?' selected':'')+'>'+p.name+'</option>').join('')
+      + '</select> <label style="font-size:12px;"><input type="checkbox" id="admYutUsed'+pi+'" '+(player.powerYut.used?'checked':'')+'> 사용함</label></div>';
+    html += '<div style="margin-bottom:10px;">말의 힘: <select id="admMalSel'+pi+'">'
+      + POWERS_MAL.map(p=>'<option value="'+p.key+'"'+(p.key===player.powerMal.key?' selected':'')+'>'+p.name+'</option>').join('')
+      + '</select> <label style="font-size:12px;"><input type="checkbox" id="admMalUsed'+pi+'" '+(player.powerMal.used?'checked':'')+'> 사용함</label></div>';
+    for(let k=0;k<4;k++){
+      const val = adminPosToValue(player.pieces[k]);
+      html += '<div style="margin-bottom:4px;font-size:13px;">말 '+(k+1)+': <select id="admPieceSel'+pi+'_'+k+'">'+adminPositionOptionsHtml(val)+'</select></div>';
+    }
+    html += '</div>';
+  }
+  html += '<div style="text-align:center;margin-bottom:12px;">현재 턴: <select id="admTurnSel">'
+    + '<option value="0"'+(current===0?' selected':'')+'>'+players[0].name+'</option>'
+    + '<option value="1"'+(current===1?' selected':'')+'>'+players[1].name+'</option>'
+    + '</select></div>';
+  html += '<div style="text-align:center;"><button class="subBtn" onclick="applyAdminEditor()" style="background:#06d6a0;color:#0a1a14;font-weight:bold;">▶️ 시작하기</button> '
+    + '<button class="subBtn" onclick="closeAdminEditor()">취소</button></div>';
+  html += '</div></div>';
+  return html;
+}
+function applyAdminEditor(){
+  for(let pi=0; pi<2; pi++){
+    const player = players[pi];
+    const yutKey = document.getElementById('admYutSel'+pi).value;
+    const yutUsed = document.getElementById('admYutUsed'+pi).checked;
+    const malKey = document.getElementById('admMalSel'+pi).value;
+    const malUsed = document.getElementById('admMalUsed'+pi).checked;
+    player.powerYut = {...POWERS_YUT.find(p=>p.key===yutKey), used:yutUsed};
+    player.powerMal = {...POWERS_MAL.find(p=>p.key===malKey), used:malUsed};
+    for(let k=0;k<4;k++){
+      const val = document.getElementById('admPieceSel'+pi+'_'+k).value;
+      const parsed = adminParsePos(val);
+      const piece = player.pieces[k];
+      piece.state = parsed.state; piece.track = parsed.track; piece.idx = parsed.idx;
+    }
+  }
+  current = parseInt(document.getElementById('admTurnSel').value, 10);
+  pendingMove=null; awaitingUnitClick=false; currentUnits=[];
+  activeYutPower=null; gaedwaejiActive=false; selection=null;
+  showRouteModal=false; routeChoices=null; _routeResolve=null;
+  pendingResults=[]; owedThrows=1; awaitingResolveChoice=false;
+  diceRolling=false; animatingIds=new Set();
+  gameOver=false; winnerIdx=null; scoreTally=null; bigResultText=null;
+  awaitingThrow = true;
+  log('🛠️ 관리자가 게임 상태를 재구성했습니다. '+players[current].name+'의 차례부터 시작합니다.');
+  adminEditorOpen = false;
+  render();
+}
 
 // ---------- state ----------
 let players, current, bombs, gates, pendingMove, awaitingThrow, awaitingUnitClick,
@@ -1845,6 +1948,10 @@ function renderModal(){
     el.innerHTML = '<div class="modalOverlay"><div class="modalBox"><h2>🌐 온라인 대전</h2>'
       + body
       + '<div style="margin-top:16px;"><button class="subBtn" onclick="closeLobby()">닫기</button></div></div></div>';
+    return;
+  }
+  if(adminEditorOpen){
+    el.innerHTML = renderAdminEditorHtml();
     return;
   }
   if(gameOver){
