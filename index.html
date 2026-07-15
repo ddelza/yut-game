@@ -299,7 +299,17 @@ function applyAdminEditor(){
   pendingResults=[]; owedThrows=1; awaitingResolveChoice=false;
   diceRolling=false; animatingIds=new Set();
   gameOver=false; winnerIdx=null; scoreTally=null; bigResultText=null;
-  awaitingThrow = true;
+  // in team mode, whether the new current team still has an unused power decides who
+  // acts next (role3 gets the gate) or not (role1 can throw) — mirror advanceTurnFlow's
+  // own rule instead of always unlocking the throw, otherwise a team with an unused
+  // power would skip the "초능력 쓸게요" gate that team mode is built around
+  if(teamMode && teamHasUnusedPower(current)){
+    teamGateOpen = true;
+    awaitingThrow = false;
+  } else {
+    teamGateOpen = false;
+    awaitingThrow = true;
+  }
   log('🛠️ 관리자가 게임 상태를 재구성했습니다. '+players[current].name+'의 차례부터 시작합니다.');
   adminEditorOpen = false;
   render();
